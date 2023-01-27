@@ -1,11 +1,20 @@
-from handicaps.calculations import handicap_calculations
-
-
+from handicaps.parsing import import_races
 import pandas as pd
 
 
 if __name__ == "__main__":
 
-    Races = pd.read_csv('Races.csv')
+    init_import = import_races('handicaps.csv')
 
-    loaded_race = pd.DataFrame.to_dict(Races)
+    result = init_import.get_corrected_times('races', ['Boat', 'Time'], 'Boat')
+
+    result_frame = pd.DataFrame(result)
+
+    sorted_results = result_frame.sort_values('corrected_time', ignore_index=True)
+
+    sorted_results.index+=1
+
+    print(sorted_results)
+            
+            
+

@@ -10,10 +10,9 @@ class maths:
 
 class handicap_calculations:
 
-    def corrected_time(boat, time, handicaps):
+    def corrected_time(boat, time, handicap):
         s = time_conversions.tosecs(time)
-        h =handicaps # int(handicaps[boat.upper()])
-        return round((s/h)*1000)
+        return time_conversions.fromsecs(round((s/handicap)*1000))
 
     def actual_time(time, target):
         return time_conversions.tosecs(time)/(target/1000)
