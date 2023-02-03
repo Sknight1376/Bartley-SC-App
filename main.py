@@ -1,20 +1,24 @@
-from handicaps.parsing import import_races
+from handicaps.parsing import import_races, formatting
 import pandas as pd
-
+from handicaps.calculations import compare_to_median
 
 if __name__ == "__main__":
 
     init_import = import_races('handicaps.csv')
 
-    result = init_import.get_corrected_times('races', ['Boat', 'Time'], 'Boat')
+    corrected_times = init_import.get_corrected_times('races', ['Time'], 'Boat')
 
-    result_frame = pd.DataFrame(result)
+    find_median = compare_to_median(corrected_times)
 
-    sorted_results = result_frame.sort_values('corrected_time', ignore_index=True)
+    with_adjusted = find_median.comparison(corrected_times)
 
-    sorted_results.index+=1
+    final = formatting.format_results(with_adjusted)
 
-    print(sorted_results)
+    print(final)
+
+    
+
+
             
             
 
