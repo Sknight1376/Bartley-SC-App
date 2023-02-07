@@ -34,8 +34,6 @@ class import_races:
 
             for row in loaded:
 
-                print(row)
-
                 handicap = [Class['Number'] for Class in handicaps if Class['Class Name'].upper() == row[boat].upper()][0]
 
                 corrected_time = handicap_calculations.corrected_time(*[row[name] for name in dict_names], int(handicap))
@@ -44,7 +42,11 @@ class import_races:
 
                 row['handicap'] = handicap
 
+                row['race'] = file
+
                 new_result.append(row)
+
+
 
         return new_result
 
@@ -60,10 +62,10 @@ class formatting:
         result_frame = pd.DataFrame(result_dict)
 
         ## Sort results by corrected time
-        sorted_results = result_frame.sort_values('corrected_time', ignore_index=True)
+        result_frame['rank'] = result_frame.groupby('race')['corrected_time'].rank(method='first')
 
         ## Amend index, starts at 1 rather than 0
-        sorted_results.index+=1
 
-        return sorted_results
+
+        return result_frame
             

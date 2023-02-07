@@ -17,6 +17,6 @@ class time_conversions:
 
         def fromsecs(seconds):
             h = seconds // 3600
-            m = seconds % 3600 // 60
-            s = seconds % 3600 % 60
+            m = '%02d' % ( seconds % 3600 // 60)
+            s = '%02d' % (seconds % 3600 % 60)
             return f'{h}.{m}.{s}'
