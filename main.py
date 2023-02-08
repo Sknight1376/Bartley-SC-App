@@ -1,5 +1,4 @@
-from handicaps.parsing import import_races, formatting
-import pandas as pd
+from handicaps.parsing import import_races
 from handicaps.calculations import compare_to_median
 
 if __name__ == "__main__":
@@ -8,13 +7,11 @@ if __name__ == "__main__":
 
     corrected_times = init_import.get_corrected_times('races', ['Time'], 'Boat')
 
-    find_median = compare_to_median(corrected_times)
 
-    with_adjusted = find_median.comparison(corrected_times)
+    print(corrected_times)
 
-    final = formatting.format_results(with_adjusted)
 
-    print(final)
+        
 
     
 

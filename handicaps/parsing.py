@@ -2,7 +2,7 @@ import pandas as pd
 from os import listdir
 from os.path import isfile, join
 
-from handicaps.calculations import handicap_calculations
+from handicaps.calculations import handicap_calculations, compare_to_median
 
 def load_files(file):
 
@@ -26,11 +26,13 @@ class import_races:
 
         handicaps = self.handicaps
 
-        new_result = []
+        all_results = []
 
         for file in listdir(dir):
 
             loaded = load_files(join(dir,file))
+
+            new_result = []
 
             for row in loaded:
 
@@ -46,9 +48,14 @@ class import_races:
 
                 new_result.append(row)
 
+            init_adjusted = compare_to_median(new_result)
+
+            adjusted = init_adjusted.comparison(new_result)
+
+            all_results.append(formatting.format_results(adjusted))
 
 
-        return new_result
+        return all_results
 
 
 
@@ -62,10 +69,7 @@ class formatting:
         result_frame = pd.DataFrame(result_dict)
 
         ## Sort results by corrected time
-        result_frame['rank'] = result_frame.groupby('race')['corrected_time'].rank(method='first')
-
-        ## Amend index, starts at 1 rather than 0
-
+        result_frame['rank'] = result_frame['corrected_time'].rank(method='first')
 
         return result_frame
             
