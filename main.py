@@ -1,5 +1,6 @@
 from handicaps.parsing import import_races
-from handicaps.calculations import compare_to_median
+from connections.connection import connect
+
 
 if __name__ == "__main__":
 
@@ -7,8 +8,14 @@ if __name__ == "__main__":
 
     corrected_times = init_import.get_corrected_times('races', ['Time'], 'Boat')
 
+    conn = connect('database.db')
 
-    print(corrected_times)
+    for frame in corrected_times:
+
+
+        conn.insert_values(frame)
+
+
 
 
         
