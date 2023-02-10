@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<body onload="startTime()">
+
+<h2>Current time</h1>
+
+<div id="txt"></div>
+
+<h3 id="Start Time"></h3>
+
+<button type="button" onclick="timeFunction('Start Time');sendtimes();disableButton('Start')" id="Start">Start Race</button>
+
+
+
+<button type="button" onclick="timeFunction('End Time');disableButton('Start')">EndRace</button>
+
+<h3 id="End Time"></h3>
+
+  <script>
+  function startTime() {
+    const today = new Date();
+    let h = today.getHours();
+    let m = today.getMinutes();
+    let s = today.getSeconds();
+    m = checkTime(m);
+    s = checkTime(s);
+    document.getElementById('txt').innerHTML =  h + ":" + m + ":" + s;
+    setTimeout(startTime, 1000);
+  }
+
+  function checkTime(i) {
+    if (i < 10) {i = "0" + i};  // add zero in front of numbers < 10
+    return i;
+  }
+
+  function timeFunction(element) {
+    var currentdate = new Date(); 
+    var datetime = element + " = " +
+              currentdate.getHours() + ":"  
+              + checkTime(currentdate.getMinutes()) + ":" 
+              + checkTime(currentdate.getSeconds())
+    document.getElementById(element).innerHTML = datetime;
+  }
+
+  function disableButton(disable_button) {
+    let element = document.getElementById(disable_button);
+    let disabled = element.getAttribute("disabled");
+    if (disabled) {
+          element.removeAttribute("disabled");
+      } else {
+          element.setAttribute("disabled", "disabled");
+    }
+  }
+
+  function sendtimes(){
+    var currentdate = new Date(); 
+    let time = currentdate.getHours() + ":"  
+              + checkTime(currentdate.getMinutes()) + ":" 
+              + checkTime(currentdate.getSeconds())
+    console.log(time)
+    const request = new XMLHttpRequest()
+        request.open('POST', `/process_times/${JSON.stringify(time)}`)
+        request.send();
+
+  }
+
+
+  </script>
+
+
+</body>
+
+</html>
