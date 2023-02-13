@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return render_template('java.html')
+    return render_template('index.html')
 
 @app.route('/process_times/<string:time>', methods=['POST'])
 def processtimes(time):

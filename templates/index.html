@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<body>
+
+<h2>Current time</h1> -->
+
+<div id="txt"></div>
+
+<h3 id="Start Time"></h3>
+
+<button type="button" onclick="timeFunction('Start Time');sendtimes();disableButton('Start')" id="Start">Start Race</button>
+
+
+
+<button type="button" onclick="timeFunction('End Time');disableButton('Start')">EndRace</button>
+
+<h3 id="End Time"></h3>
+
+<script type="text/javascript" src="{{ url_for('static', filename='js/time_functions.js')}}"></script>
+
+<script type="text/javascript" src="{{ url_for('static', filename='js/main.js')}}"></script>
+
+
+
+</body>
+
+</html>
