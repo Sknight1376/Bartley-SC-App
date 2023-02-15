@@ -30,10 +30,6 @@ def processtimes(time):
     print(times)
     return('/')
 
-@app.route('/submit', methods=['POST'])
-def processentries():
-    return('/')
-
 
 
 

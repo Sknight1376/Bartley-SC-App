@@ -40,14 +40,17 @@ const submit = document.getElementById('Submit')
 const sailor_submit_button = document.getElementById('Sailor Submit')
     sailor_submit_button.addEventListener("click",() => {
         var classes = document.getElementById('Boat');
-        var classname = classes.options[classes.selectedIndex].text;
-        appendentriesFunction(classname, "df");
+        let classname = classes.options[classes.selectedIndex].text;
+        let sailno = document.getElementById('Sail Number').value
+        appendentriesFunction(classname, sailno);
     }
     )
 
 function variables(vars) {
     return vars
     }
+
+
 
   function disableButton(disable_button) {
     let element = document.getElementById(disable_button);
