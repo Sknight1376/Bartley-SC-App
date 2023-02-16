@@ -30,6 +30,13 @@ def processtimes(time):
     print(times)
     return('/')
 
+@app.route('/times/<string:time>', methods=['POST'])
+def times(time):
+    times = json.loads(time)
+    print()
+    print(times)
+    return('/')
+
 
 
 

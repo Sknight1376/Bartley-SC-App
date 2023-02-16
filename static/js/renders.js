@@ -23,11 +23,27 @@ function appendentriesFunction(Boat, Sail) {
         lapbutton.addEventListener("click",() => {
             let row = document.getElementById(`${Boat} ${Sail} row`);
             let time = document.getElementById("Elapsed Time").innerHTML;
-            let cell = row.insertCell(4);
-            cell.innerHTML = time
-        })
+            console.log(Boat)
+            let cell = row.insertCell(row.children.length-2);
+            cell.innerHTML = time;
 
-    }
+            let obj = JSON.stringify({'Boat': Boat,'Elapsed_time': time})
+            const request = new XMLHttpRequest()
+            request.open('POST', `/times/${obj}`)
+            request.send();
+
+            
+            const header = document.querySelector("thead#headers>tr");
+            let lap = document.createElement("th");
+            let text = document.createTextNode(`Lap ${row.children.length-4}`);
+            lap.appendChild(text);
+            header.appendChild(lap)
+            console.log(`Lap ${row.children.length-4}`)
+
+
+        });
+
+    };
 
 
 }
