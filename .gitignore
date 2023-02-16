@@ -2,3 +2,6 @@ races/Race_2.csv
 races/Race.csv
 database.db
 */__pycache__
+__pycache__
+api.log
+
