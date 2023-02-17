@@ -45,7 +45,7 @@ function stopelapsedtime() {
       
 
 function clock(element) {
-    document.getElementById(element).innerHTML = timeFunction()
+    document.getElementById(element).innerHTML = `Current Time : ${timeFunction()}`
       setTimeout(clock, 1000, element)
   }
 

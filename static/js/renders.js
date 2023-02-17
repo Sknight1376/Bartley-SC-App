@@ -1,49 +1,70 @@
 
 
 function appendentriesFunction(Boat, Sail) {
-    let table = document.querySelector("table#entries>tbody");
+    $("#entries tbody").append(`<tr id = ${Boat}_${Sail}_row>
+    <td class = control><button type="button" id = "${Boat}_${Sail}_lap" value = 0 class = control_button>Lap</button></td>
+    <td class = control><button type="button" id = "${Boat}_${Sail}_finish" class = control_button>Finish</button></td>
+    <td>${Boat}</td>
+    <td>${Sail}</td>
+    </tr>`)
 
-    let row = table.insertRow(-1);
-
-    let cellone = row.insertCell(0);
-    let celltwo = row.insertCell(1);
-    let cellthree = row.insertCell(2);
-    let cellfour = row.insertCell(3);
-
-    row.id = `${Boat} ${Sail} row`
-    cellone.innerText = Boat
-    celltwo.innerText = Sail
-    cellthree.innerHTML = `<button type="button" id = "${Sail} lap" value = "${Boat} ${Sail}">Lap</button>`
-    cellfour.innerHTML = `<button type="button" id = "${Sail} finish" value = "${Boat} ${Sail}">Finish</button>`
-
-    laprecorder(Boat, Sail)
-
-    function laprecorder (Boat, Sail) {
-        const lapbutton = document.getElementById(`${Sail} lap`)
-        lapbutton.addEventListener("click",() => {
-            let row = document.getElementById(`${Boat} ${Sail} row`);
-            let time = document.getElementById("Elapsed Time").innerHTML;
-            console.log(Boat)
-            let cell = row.insertCell(row.children.length-2);
-            cell.innerHTML = time;
-
-            let obj = JSON.stringify({'Boat': Boat,'Elapsed_time': time})
-            const request = new XMLHttpRequest()
-            request.open('POST', `/times/${obj}`)
-            request.send();
-
-            
-            const header = document.querySelector("thead#headers>tr");
-            let lap = document.createElement("th");
-            let text = document.createTextNode(`Lap ${row.children.length-4}`);
-            lap.appendChild(text);
-            header.appendChild(lap)
-            console.log(`Lap ${row.children.length-4}`)
+    $(".control").hide()
 
 
-        });
-
-    };
-
+    laprecorder($(`#${Boat}_${Sail}_lap`), `#${Boat}_${Sail}_row`, Boat, Sail, "Lap")
+    laprecorder($(`#${Boat}_${Sail}_finish`), `#${Boat}_${Sail}_row`, Boat, Sail, "Finish")
 
 }
+
+
+function laprecorder(button, row, Boat, Sail, record_type) {
+
+    button.on("click", () => {
+
+        button.val(+button.val() + +1 )
+
+        if  (record_type == "Lap") {
+            var headername = `Lap ${button.val()}`
+            var classname = `lap_${button.val()}`
+        }else{
+            var headername = "Final"
+            var classname = "Final"
+            $(`#${Boat}_${Sail}_lap`).hide()
+            $(`#${Boat}_${Sail}_finish`).hide()
+        }
+        
+        
+        if ($("#entries tbody tr").length == $(".control_button:hidden").length/2){
+            $(".control").hide()}
+
+        let Elapsed_Time =  $("#Elapsed_Time").text()
+        $(`${row} td:last`).after(`<td>${Elapsed_Time}</td>`)
+
+        if ($(`#headers th:last`).text() !== `${headername} Position`) {
+
+            $(`#headers th:last`).after(`<th>${headername}</th>`)
+            $(`#headers th:last`).after(`<th>${headername} Corrected</th>`)
+            $(`#headers th:last`).after(`<th>${headername} Position</th>`)
+        }
+        
+
+        $.post('/times',
+        {Elapsed: Elapsed_Time,
+            boat: Boat}, function(data) {
+            console.log(data)
+            $(`${row} td:last`).after(
+                `<td class = ${classname} value = ${data['seconds']}>${data['corrected_time']}</td>
+                <td class = ${classname}_rank></td>`)
+
+                $(`.${classname}`)
+                .map(function() {return $(this).attr('value')})
+                .get()
+                .sort(function(a,b){return a - b }).reverse()
+                .reduce(function(a, b) {if (b != a[0]) a.unshift(b);return a}, [])
+                .forEach((v,i)=>{
+                    $(`.${classname}`).filter(function() {return $(this).attr('value') == v;}).next().text(i + 1);
+                });    
+        })
+    })
+}
+

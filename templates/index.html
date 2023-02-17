@@ -1,55 +1,85 @@
 <!DOCTYPE html>
 <html lang="en">
 
+<head>
+    <script src="static/js/jquery-3.6.3.min.js"></script>
+    <link rel= "stylesheet" href= "{{ url_for('static',filename='styles/racepage.css') }}">
+</head>
+
 <body>
+    <div class = "time">
+        <h3  id = "clock">
 
-<h2>Current time</h2>
+        <h3 id="Start_Time"></h3>
 
-<div id="txt"></div>
+        <h3 id="Elapsed_Time_Header"></h3>
 
-<h3 id="Start Time"></h3>
+        <h1 id="Elapsed_Time"></h1>
+    </div>
 
-<button type="button" id="Start">Start Race</button>
+    <br>
 
-<button type="button" id = "End">End Race</button>
+    <div>
 
-<button type="button" id="Submit" disabled = "disabled">Submit Race Results</button>
+        <button type="button" id="Start">Start Race</button>
 
-<h3 id="Elapsed Time" >00:00:00</h3>
+        <button type="button" id = "End">End Race</button>
 
-<form>
-    <label for="Boat">Boat</label>
-    <select id="Boat"></select>
-    <label for="Sail Number">Sail Number</label>
-    <input type="text" id="Sail Number">
-</form>
-<br>
-<button type="button" id="Sailor Submit" >Submit</button>
-<br>
-<table id = "entries">
-    <thead id = "headers">
-        <th> Boat </th>
-        <th> Sail Number</th>
-    </thead>
-    <tbody>
-    </tbody>
-</table>
+        <button type="button" id="Submit" disabled = "disabled">Submit Race Results</button>
 
-<script type="text/javascript" src="{{ url_for('static', filename='js/time_functions.js')}}"></script>
+    </div>
 
-<script type="text/javascript" src="{{ url_for('static', filename='js/renders.js')}}"></script>
+    <br>
 
-<script type="text/javascript" src="{{ url_for('static', filename='js/main.js')}}"></script>
+    <form class = "competitors">
+        <label for="Boat">Boat</label>
+        <select id="Boat"></select>
+        <label for="Sail Number">Sail Number</label>
+        <input type="text" id="Sail Number">
+    </form>
+    <br>
+    <button type="button" id="Sailor Submit" class = competitors>Submit</button>
+    <br>
+    <br>
+    <table id = "entries" class = "tables">
+        <thead id = "headers">
+            <th class = control></th>
+            <th class = control></th>
+            <th> Boat </th>
+            <th> Sail Number</th>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
 
-<script type="text/javascript">
+    <script type="text/javascript" src="{{ url_for('static', filename='js/time_functions.js')}}"></script>
 
-    allvariables = variables({{boatarray|tojson}})
+    <script type="text/javascript" src="{{ url_for('static', filename='js/renders.js')}}"></script>
 
-    var boatselect = document.getElementById("Boat");
-    for (index in  allvariables) {
-        boatselect.options[boatselect.options.length] = new Option(allvariables[index], index)
-    }
-</script>
+    <script type="text/javascript" src="{{ url_for('static', filename='js/main.js')}}"></script>
+
+    <script type="text/javascript">
+
+        allvariables = variables({{boatarray|tojson}})
+
+        var boatselect = document.getElementById("Boat");
+        for (index in  allvariables) {
+            boatselect.options[boatselect.options.length] = new Option(allvariables[index], index)
+        }
+
+        $(function(){  
+  
+            $(':text').bind('keydown',function(e){ //on keydown for all textboxes  
+
+            if(e.keyCode==13) //if this is enter key  
+
+          e.preventDefault();   
+          
+
+  });  
+
+}); 
+    </script>
 
 </body>
 

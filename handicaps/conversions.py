@@ -4,7 +4,7 @@ import re
 class time_conversions:
 
         def tosecs(time):
-            split_time = re.split(r'\.',str(time))
+            split_time = re.split(r'\:',time)
             if len(split_time) > 2:
                 h = int(split_time[0])*3600
                 m = int(split_time[1])*60
@@ -19,4 +19,4 @@ class time_conversions:
             h = seconds // 3600
             m = '%02d' % ( seconds % 3600 // 60)
             s = '%02d' % (seconds % 3600 % 60)
-            return f'{h}.{m}.{s}'
+            return f'{h}:{m}:{s}'

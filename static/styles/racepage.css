@@ -1,0 +1,35 @@
+body {
+    margin:50px 0px; padding:0px;
+    text-align:center;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #0563b2;
+    background-color:#c7ddee;
+  }
+
+form {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+
+.time {
+  color: #040444;
+  text-align: center;;
+}
+
+table.tables, td {
+  align-content: center;
+  table-layout: auto;
+  text-align: center;
+  border: 1px solid;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+th  {
+  background-color: #0563b2;
+  text-align: center;
+  border: 1px solid;
+  font-size: 20px;
+  color: #ffffff;
+}

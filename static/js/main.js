@@ -1,21 +1,28 @@
 
 if (document.readyState !== "loading") {
-    clock.call('txt');
+    clock.call('clock');
     rendertableFunction();
+    $("#entries").hide();
 } else {
-    document.addEventListener("DOMContentLoaded", clock('txt'));
+    document.addEventListener("DOMContentLoaded", clock('clock'));
+    $("#entries").hide();
 };
 
-const start_button = document.getElementById('Start')
-start_button.addEventListener("click",() => {
-    document.getElementById('Start Time').innerHTML = timeFunction();
-    disableButton('Start');
-    startelapsedtime(new Date(), 'Elapsed Time');}
-    )
+const start_button = $("#Start").click(() => {
+    if ($("#entries tbody tr").length > 0){
+        $("#Start_Time").text(`Race started at ${timeFunction()}`);
+        disableButton('Start');
+        $("#Elapsed_Time_Header").text("Elapsed Time");
+        startelapsedtime(new Date(), 'Elapsed_Time');
+        $(".control").show();
+        $(".competitors").hide()
+    }else{
+        alert("there are no entries")
+    }
+})
 
 
-const end_button = document.getElementById('End')
-    end_button.addEventListener("click",() => {
+const end_button = $("#End").click(() => {
     stopelapsedtime();
     disableButton('End');
     disableButton('Submit');}
@@ -24,7 +31,7 @@ const end_button = document.getElementById('End')
 const submit = document.getElementById('Submit')
     submit.addEventListener("click",() => {
         let start_time = document.getElementById('Start Time').innerHTML;
-        let end_time = document.getElementById('Elapsed Time').innerHTML;
+        let end_time = document.getElementById('Elapsed_Time').innerHTML;
 
         sendtimes(JSON.stringify({'Start_time': start_time,'Elapsed_time': end_time}));
         disableButton('Start');
@@ -43,6 +50,7 @@ const sailor_submit_button = document.getElementById('Sailor Submit')
         let classname = classes.options[classes.selectedIndex].text;
         let sailno = document.getElementById('Sail Number').value
         appendentriesFunction(classname, sailno);
+        $("#entries").show()
     }
     )
 
