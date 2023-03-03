@@ -22,5 +22,7 @@ class connect:
     def insert_values(self, frame):
 
         frame.to_sql('race_data', self.conn, if_exists="append")
-
     
+    def close_connection(self):
+        
+        self.c.close()
