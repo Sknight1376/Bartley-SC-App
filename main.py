@@ -15,6 +15,11 @@ if __name__ == "__main__":
 
         conn.insert_values(frame)
 
+        
+
+    
+    conn.close_connection()
+
 
 
 
