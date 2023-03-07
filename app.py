@@ -38,9 +38,9 @@ def index():
 @app.route('/process_times/<string:time>', methods=['POST'])
 def processtimes(time):
     times = json.loads(time)
-    print()
-    print(times)
-    return('/')
+    for entry in times:
+        print(entry['Boat'])
+    return "Done"
 
 @app.route('/times', methods=['POST'])
 def times():
