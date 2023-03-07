@@ -28,18 +28,33 @@ const end_button = $("#End").click(() => {
     disableButton('Submit');}
     )
 
-const submit = document.getElementById('Submit')
-    submit.addEventListener("click",() => {
-        let start_time = document.getElementById('Start Time').innerHTML;
-        let end_time = document.getElementById('Elapsed_Time').innerHTML;
+const submit = $('#Submit').click(() => {
+        var myRows = [];
+        var headersText = [];
+        var $headers = $("th");
 
-        sendtimes(JSON.stringify({'Start_time': start_time,'Elapsed_time': end_time}));
+        // Loop through grabbing everything
+        var $rows = $("tbody tr").each(function(index) {
+        $cells = $(this).find("td");
+        myRows[index] = {};
+
+        $cells.each(function(cellIndex) {
+            // Set the header text
+            if(headersText[cellIndex] === undefined) {
+            headersText[cellIndex] = $($headers[cellIndex]).text();
+            }
+            // Update the row object with the header/cell combo
+            myRows[index][headersText[cellIndex]] = $(this).text();
+        });    
+        });
+
+        sendtimes(JSON.stringify(myRows));
         disableButton('Start');
         disableButton('End');
         disableButton('Submit');
 
-        document.getElementById('Elapsed Time').innerHTML = "00:00:00"
-        document.getElementById('Start Time').innerHTML = ""
+        // document.getElementById('Elapsed Time').innerHTML = "00:00:00"
+        // document.getElementById('Start Time').innerHTML = ""
 
         }
         )
