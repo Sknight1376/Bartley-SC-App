@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <script src="static/js/jquery-3.6.3.min.js"></script>
+    <link rel= "stylesheet" href= "{{ url_for('static',filename='styles/racepage.css') }}">
+</head>
+
+<body>
+    <div class = "time">
+        <h3  id = "clock">
+
+        <h3 id="Start_Time"></h3>
+
+        <h3 id="Elapsed_Time_Header"></h3>
+
+        <h1 id="Elapsed_Time"></h1>
+    </div>
+
+    <br>
+
+    <div>
+
+        <button type="button" id="Start">Start Race</button>
+
+        <button type="button" id = "End">End Race</button>
+
+        <button type="button" id="Submit" disabled = "disabled">Submit Race Results</button>
+
+    </div>
+
+    <br>
+
+    <form class = "competitors">
+        <label for="Boat">Boat</label>
+        <select id="Boat"></select>
+        <label for="Sail Number">Sail Number</label>
+        <input type="text" id="Sail Number">
+    </form>
+    <br>
+    <button type="button" id="Sailor Submit" class = competitors>Submit</button>
+    <br>
+    <br>
+    <table id = "entries" class = "tables">
+        <thead id = "headers">
+            <th class = control></th>
+            <th class = control></th>
+            <th>Boat</th>
+            <th>Sail Number</th>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+
+    <script type="text/javascript" src="{{ url_for('static', filename='js/time_functions.js')}}"></script>
+
+    <script type="text/javascript" src="{{ url_for('static', filename='js/renders.js')}}"></script>
+
+    <script type="text/javascript" src="{{ url_for('static', filename='js/main.js')}}"></script>
+
+    <script type="text/javascript">
+
+        allvariables = variables({{boatarray|tojson}})
+
+        var boatselect = document.getElementById("Boat");
+        for (index in  allvariables) {
+            boatselect.options[boatselect.options.length] = new Option(allvariables[index], index)
+        }
+
+        $(function(){  
+  
+            $(':text').bind('keydown',function(e){ //on keydown for all textboxes  
+
+            if(e.keyCode==13) //if this is enter key  
+
+          e.preventDefault();   
+          
+
+  });  
+
+}); 
+    </script>
+
+</body>
+
+</html>
