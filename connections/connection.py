@@ -18,7 +18,7 @@ class connect:
         self.cursor = self.conn.cursor()
         
 
-    def get_boats(self):
+    def handicapcontrol(self):
 
         cursor = self.cursor 
 
@@ -27,18 +27,50 @@ class connect:
         handicaps = pd.DataFrame(cursor.fetchall(), columns=['Date','Class_Name', 'Handicap'])
         self.conn.commit()
 
+        self.conn.close()
+        self.cursor.close()
 
-        boats = handicaps['Class_Name'].sort_values()
-        c = 1
-        boatsarray = {}
-        for i in boats:
-            boatsarray[c] = i
-            c+=1
-
-        return boatsarray
-    
-    def close_connection(self):
+        return handicaps
         
+    def inserttime(self, timedict):
+
+
+        boat            =   timedict['Boat']
+        sail_number     =   "test"
+        handicap        =   100
+        club            =   "test"
+        series          =   "test"
+        race            =   1
+        recorded_time   =   timedict['elapsed_time']
+        corrected_time  =   timedict['corrected_time']
+        position 	    =   1
+        time            =   timedict['time']
+
+        cursor = self.cursor 
+
+        cursor.execute(f'''INSERT INTO "RACINGAPP"."RACEMASTER" (Boat,
+            Sail_number, 
+            handicap,
+            club,
+            series,
+            race,
+            recorded_time,
+            corrected_time,
+            position,
+            time)
+            values('{boat}',
+                '{sail_number}',
+                {handicap},
+                '{club}',
+                '{series}',
+                {race},
+                '{recorded_time}',
+                '{corrected_time}',
+                {position},
+                '{time}' )''')
+        
+        self.conn.commit()
+
         self.conn.close()
         self.cursor.close()
 

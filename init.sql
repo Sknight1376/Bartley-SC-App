@@ -12,7 +12,7 @@ CREATE TABLE "RACINGAPP"."RACES"
 	race 			int NULL,
 	recorded_time 	timestamp NULL,
 	corrected_time 	timestamp NULL,
-	position 		int NULL
+	final_position 	int NULL
 );
 
 CREATE TABLE "RACINGAPP"."SERIESCONTROL"
@@ -38,6 +38,25 @@ CREATE TABLE "RACINGAPP"."HANDICAPCONTROL"
 	boat			varchar(255) NOT NULL,
 	handicap		int NOT NULL
 );
+
+
+CREATE TABLE "RACINGAPP"."RACEMASTER"
+(
+	boat			varchar(255) NOT NULL,
+	sail_number		varchar(255) NOT NULL,
+	handicap 		int NULL,
+	club			varchar(255) NULL,
+	series			varchar(255) NULL,
+	race 			int NULL,
+	recorded_time 	time NULL,
+	corrected_time 	time NULL,
+	position 		int NULL,
+	time			time
+);
+
+
+
+
 CREATE TABLE "AUDIT".cdc
 (
 	TableName varchar(255) NULL,

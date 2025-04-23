@@ -49,8 +49,9 @@ function laprecorder(button, row, Boat, Sail, record_type) {
         
 
         $.post('/times',
-        {Elapsed: Elapsed_Time,
-            boat: Boat}, function(data) {
+        {elapsed: Elapsed_Time,
+            boat: Boat,
+            split: timeFunction()}, function(data) {
             console.log(data)
             $(`${row} td:last`).after(
                 `<td class = ${classname} value = ${data['seconds']}>${data['corrected_time']}</td>
