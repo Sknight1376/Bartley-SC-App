@@ -1,0 +1,33 @@
+services:
+  # db_init:
+  #   # build: .
+  #   image: postgres
+  #   volumes:
+  #     - entrypoint:/docker-entrypoint-initdb.d
+  db:
+    image: postgres
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_USER: dwh
+      POSTGRES_PASSWORD: DBTTEST
+      POSTGRES_DB: dwh
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+      - entrypoint:/docker-entrypoint-initdb.d
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      # - ./test.sql:/docker-entrypoint-initdb.d/test.sql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "dwh"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+    # depends_on:
+      # db_init:
+      #   condition: service_completed_successfully
+  
+
+volumes:
+  postgres-db-volume:
+  entrypoint:
