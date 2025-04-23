@@ -15,3 +15,5 @@ Instant results
 Series Results
 
 Stream results
+
+Series list

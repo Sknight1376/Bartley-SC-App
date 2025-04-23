@@ -1,28 +1,46 @@
-import sqlite3
-import os
+import psycopg2
 import pandas as pd
+
+
+
+
 
 class connect:
 
-    def __init__(self, conn):
+    def __init__(self):
 
-        self.conn = sqlite3.connect(conn)
+        self.conn = psycopg2.connect(database="dwh",
+                        host="localhost",
+                        user="dwh",
+                        password="DBTTEST",
+                        port="5432")
 
-        self.c = self.conn.cursor()
+        self.cursor = self.conn.cursor()
         
-        if os.path.exists(conn)==False:
 
-            with open('connections/schema.sql', 'r') as script:
+    def get_boats(self):
 
-                schema = script.read()
+        cursor = self.cursor 
 
-            self.c.executescript(schema)    
+        cursor.execute('SELECT * FROM "RACINGAPP"."HANDICAPCONTROL"')
+
+        handicaps = pd.DataFrame(cursor.fetchall(), columns=['Date','Class_Name', 'Handicap'])
+        self.conn.commit()
 
 
-    def insert_values(self, frame):
+        boats = handicaps['Class_Name'].sort_values()
+        c = 1
+        boatsarray = {}
+        for i in boats:
+            boatsarray[c] = i
+            c+=1
 
-        frame.to_sql('race_data', self.conn, if_exists="append")
+        return boatsarray
     
     def close_connection(self):
         
-        self.c.close()
+        self.conn.close()
+        self.cursor.close()
+
+
+

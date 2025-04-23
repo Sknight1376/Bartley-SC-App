@@ -2,18 +2,18 @@
 from flask import Flask, render_template, jsonify, request
 import json
 import pandas as pd
+import psycopg2
+
 from handicaps.calculations import handicap_calculations
 from handicaps.conversions import time_conversions
+from connections.connection import connect
+
 
 def get_boats():
-    handicaps = pd.read_csv('handicaps.csv')
 
-    boats = handicaps['Class_Name'].sort_values()
-    c = 1
-    boatsarray = {}
-    for i in boats:
-        boatsarray[c] = i
-        c+=1
+    cursor = connect()
+
+    boatsarray= cursor.get_boats()
 
     return boatsarray
 

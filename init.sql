@@ -22,6 +22,22 @@ CREATE TABLE "RACINGAPP"."SERIESCONTROL"
 	club			varchar(255) NULL
 );
 
+
+CREATE TABLE "RACINGAPP"."SAILORCONTROL"
+(
+	boat			varchar(255) NOT NULL,
+	sail_number		varchar(255) NOT NULL,
+	FirstName 		varchar(255) NOT NULL,
+	LastName		varchar(255) NULL,
+	club			varchar(255) NULL
+);
+
+CREATE TABLE "RACINGAPP"."HANDICAPCONTROL"
+(
+	date			DATE NOT NULL,
+	boat			varchar(255) NOT NULL,
+	handicap		int NOT NULL
+);
 CREATE TABLE "AUDIT".cdc
 (
 	TableName varchar(255) NULL,
