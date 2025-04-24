@@ -19,27 +19,40 @@
 
     <br>
 
-    <div>
-
-        <button type="button" id="Start">Start Race</button>
-
-        <button type="button" id = "End">End Race</button>
-
-        <button type="button" id="Submit" disabled = "disabled">Submit Race Results</button>
-
-    </div>
+    <form class = "club">
+        <label for="Club Name">Club Name</label>
+        <input type="text" id="Club Name">
+        <label for="Series">Series</label>
+        <input type="text" id="Series">
+    </form>
 
     <br>
 
     <form class = "competitors">
+        <label for="First Name">First Name</label>
+        <input type="text" id="First Name">
+        <label for="Last Name">Last Name</label>
+        <input type="text" id="Last Name">
         <label for="Boat">Boat</label>
         <select id="Boat"></select>
         <label for="Sail Number">Sail Number</label>
         <input type="text" id="Sail Number">
     </form>
     <br>
-    <button type="button" id="Sailor Submit" class = competitors>Submit</button>
+    <button type="button" id="Sailor Submit" class = competitors>Submit Boat</button>
     <br>
+    <br>
+
+    <div>
+
+        <button type="button" id="Start" class="Start">Start Race</button>
+
+        <button type="button" id = "End">End Race</button>
+
+        <!-- <button type="button" id="Submit" disabled = "disabled">Submit Race Results</button> -->
+
+    </div>
+
     <br>
     <table id = "entries" class = "tables">
         <thead id = "headers">
