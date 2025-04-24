@@ -48,7 +48,9 @@ class connect:
 
         cursor = self.cursor 
 
-        cursor.execute(f'''INSERT INTO "RACINGAPP"."RACEMASTER" (Boat,
+        cursor.execute(f'''INSERT INTO "RACINGAPP"."RACEMASTER" (
+            Key,
+            Boat,
             Sail_number, 
             handicap,
             club,
@@ -58,7 +60,9 @@ class connect:
             corrected_time,
             position,
             time)
-            values('{boat}',
+            values(
+                nextval('key'),
+                '{boat}',
                 '{sail_number}',
                 {handicap},
                 '{club}',
