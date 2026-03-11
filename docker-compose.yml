@@ -5,18 +5,18 @@ services:
   #   volumes:
   #     - entrypoint:/docker-entrypoint-initdb.d
   db:
-    image: postgres
+    build: .
+    # image: postgres
     ports:
       - 5432:5432
     environment:
       POSTGRES_USER: dwh
       POSTGRES_PASSWORD: DBTTEST
       POSTGRES_DB: dwh
+      PGDATA: /var/lib/postgresql/data
     volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
       - entrypoint:/docker-entrypoint-initdb.d
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-      # - ./test.sql:/docker-entrypoint-initdb.d/test.sql
+      # - postgres-db-volume:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "dwh"]
       interval: 10s
@@ -27,7 +27,19 @@ services:
       # db_init:
       #   condition: service_completed_successfully
   
-
+  web: 
+    build:
+      context: app
+      target: builder
+    # flask requires SIGINT to stop gracefully
+    # (default stop signal from Compose is SIGTERM)
+    stop_signal: SIGINT
+    ports:
+      - '5000'
+    depends_on:
+      - db
+    restart: on-failure:5
 volumes:
-  postgres-db-volume:
+#   postgres-db-volume:
   entrypoint:
+  PGDATA:

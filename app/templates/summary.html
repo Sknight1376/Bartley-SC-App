@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Race Summary</title>
+  <link rel="">
+</head>
+<body>
+  <h1>Race Summary</h1>
+
+  <div class="summary-facts">
+    <p><strong>Club:</strong> {{ club_name }}</p>
+    <p><strong>Series:</strong> {{ series_name }}</p>
+    <p><strong>Race #:</strong> {{ race }}</p>
+
+    <p><strong>Race started:</strong> {{ start }}</p>
+    <p><strong>Race ended:</strong> {{ end }}</p>
+    {% if duration %}<p><strong>Duration:</strong> {{ duration }}</p>{% endif %}
+
+    <p><strong>Number of entries:</strong> {{ entry_count }}</p>
+  </div>
+
+  <h2>Final Results (ordered by corrected time)</h2>
+
+  <table class="tables">
+    <thead>
+      <tr>
+        <th>Position</th>
+        <th>Boat ID</th>
+        <th>Recorded Time</th>
+        <th>Corrected Time</th>
+        <th>Recorded At</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in results %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ row.boatkey }}</td>
+        <td>{{ row.recorded_time }}</td>
+        <td>{{ row.corrected_time }}</td>
+        <td>{{ row.time }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <br>
+  /Start another race</a>
+</body>
+</html>

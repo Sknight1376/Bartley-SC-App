@@ -33,3 +33,7 @@ th  {
   font-size: 20px;
   color: #ffffff;
 }
+
+tr.finished {
+  opacity: 0.6;
+}

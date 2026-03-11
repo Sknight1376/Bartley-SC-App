@@ -2,35 +2,18 @@ import psycopg2
 import pandas as pd
 
 
-
-
-
 class connect:
 
     def __init__(self):
 
         self.conn = psycopg2.connect(database="dwh",
-                        host="localhost",
+                        host="db",
                         user="dwh",
                         password="DBTTEST",
                         port="5432")
 
         self.cursor = self.conn.cursor()
         
-
-    def handicapcontrol(self):
-
-        cursor = self.cursor 
-
-        cursor.execute('SELECT * FROM "RACINGAPP"."HANDICAPCONTROL"')
-
-        handicaps = pd.DataFrame(cursor.fetchall(), columns=['Date','Class_Name', 'Handicap'])
-        self.conn.commit()
-
-        self.conn.close()
-        self.cursor.close()
-
-        return handicaps
         
     def inserttime(self, timedict):
 
@@ -50,7 +33,7 @@ class connect:
 
         cursor.execute(f'''INSERT INTO "RACINGAPP"."RACEMASTER" (
             Key,
-            Boat,
+            Boatkey,
             Sail_number, 
             handicap,
             club,
