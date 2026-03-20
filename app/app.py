@@ -38,9 +38,13 @@ class Boats(db.Model):
 class RaceMaster(db.Model):
     __table__ = db.metadata.tables["RACINGAPP.RACEMASTER"]
 
-# Reflected RACEMASTER
+# Reflected CLUBCONTROL
 class ClubControl(db.Model):
     __table__ = db.metadata.tables["RACINGAPP.CLUBCONTROL"]
+
+# Reflected SERIESCONTROL
+class SeriesControl(db.Model):
+    __table__ = db.metadata.tables["RACINGAPP.SERIESCONTROL"]
 
 # >>> SET THIS to your real sequence name (schema/case sensitive)
 # Example: '"RACINGAPP"."KEY"'
@@ -98,9 +102,15 @@ def get_or_create_series_id(series_name: str, club: str | None = None) -> int:
 # ---------- routes ----------
 
 @app.route("/")
-def index():
-    all_boats = Boats.query.with_entities(Boats.boat, Boats.key).all()
-    return render_template("index.html", boatarray=[(b.boat, b.key) for b in all_boats])
+def club_entry():
+    
+    return render_template("club_entry.html")
+
+@app.route("/sailor_entry")
+def sailor_entry():
+    # Boat list not strictly needed for race now (entries come from sessionStorage),
+    # but we pass it anyway in case you want it later.
+    return render_template("sailor_entry.html")
 
 @app.route("/race")
 def race():
@@ -173,7 +183,7 @@ def times():
             {
                 "boatkey": boat_id,
                 "club": club_id,
-                "series": '1',
+                "series": series_id,
                 "race": race_no,
                 "recorded": recorded_time,
                 "corrected": corrected_time,
@@ -245,62 +255,20 @@ def summary():
                            entry_count=entry_count, results=results,
                            club_name=club_name, series_name=series_name, race=race_no)
 
-
-
-
 @app.get("/api/clubs")
-def api_get_clubs():
-    sql = text('SELECT name FROM "RACINGAPP"."CLUBCONTROL" ORDER BY name')
-    with db.engine.begin() as conn:
-        rows = conn.execute(sql).fetchall()
-    return jsonify({"clubs": [r[0] for r in rows]})
+def api_get_club():
+    clubcontrol = ClubControl.query.with_entities(ClubControl.name, ClubControl.key).all()
+    clubs = [{"id": b.key, "name": b.name} for b in clubcontrol]
+    return jsonify(clubs=clubs)
 
 
+@app.get("/api/series/<club_id>")
+def api_get_series(club_id):
+    seriescontrol = SeriesControl.query.with_entities(SeriesControl.name, SeriesControl.key).filter_by(club=club_id)
+    series = [{"id": b.key, "name": b.name} for b in seriescontrol]
+    return jsonify(series=series)
 
-@app.post("/api/clubs")
-def api_upsert_club():
-    data = request.get_json(silent=True) or {}
 
-    # IMPORTANT: keep as STRING here
-    club_name = normalise(data.get("club_name", ""))
-    if not club_name:
-        return jsonify({"error": "club_name is required"}), 400
-
-    # Deterministic bigint hash key from the name
-    key = create_key(club_name)
-
-    with db.engine.begin() as conn:
-        # If club already exists by name, return its key
-        existing = conn.execute(
-            text('SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = :n'),
-            {"n": club_name}
-        ).scalar()
-
-        if existing is not None:
-            return jsonify({"key": int(existing), "club_name": club_name, "created": False})
-
-        # Try insert using hash key
-        try:
-            conn.execute(
-                text('INSERT INTO "RACINGAPP"."CLUBCONTROL"(key, name) VALUES (:k, :n)'),
-                {"k": key, "n": club_name}
-            )
-            return jsonify({"key": key, "club_name": club_name, "created": True})
-
-        except Exception:
-            # Potential hash collision: key already exists for different club_name
-            other = conn.execute(
-                text('SELECT club_name FROM "RACINGAPP"."CLUBCONTROL" WHERE key = :k'),
-                {"k": key}
-            ).scalar()
-
-            if other and other != club_name:
-                return jsonify({
-                    "error": "Hash collision: generated key already exists for a different club",
-                    "existing_club_name": other
-                }), 409
-
-            raise
 
 
 

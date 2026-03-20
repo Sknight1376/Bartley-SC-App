@@ -1,3 +1,4 @@
+
 services:
   # db_init:
   #   # build: .
@@ -39,7 +40,15 @@ services:
     depends_on:
       - db
     restart: on-failure:5
+    develop:
+      watch:
+        - action: sync+restart
+          path: .
+          target: /
+
+
 volumes:
 #   postgres-db-volume:
   entrypoint:
   PGDATA:
+  

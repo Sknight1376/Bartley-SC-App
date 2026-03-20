@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="static/js/jquery-3.6.3.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+</head>
+<body>
+
+<div class="lettering">QuickSail</div>
+
+
+<section class="banner">
+</section>
+
+  <br>
+
+<div class = "form-border">
+    <div class = "entry-banner">
+    <div style="color: #ffffff; text-align: center; line-height: 40px; background: #D7D9FD;">1. Entry</div>
+    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color: #ffffff; text-align: center; line-height: 40px;">2. Sailor</div>
+    <div style="color: #979797; text-align: center; line-height: 40px;">3. Summary</div>
+    </div>
+    <br>
+<h4 style="color: #979797">Step Two</h4>
+<h2>Boat and Sailor Details></Details></h2>
+<h4 style="color: #979797">Add the race entries</h4>
+  <form class="form-inline">
+    <div style="vertical-align: middle; padding-left: 110px; padding-right: 110px;">
+    <label for="clubName" style = "color: black;">Club</label>
+      <select id="clubName" aria-label="Select club"></select>
+    </div>
+
+    <div style="vertical-align: middle;">
+    <label for="clubName" style = "color: black;">Series</label>
+    <select id="seriesName" aria-label="Select series" disabled>
+    </select>
+    </div>
+  </form>
+
+
+
+<script type="text/javascript" src="{{ url_for('static', filename='js/test.js')}}"></script>
+
+<script type="text/javascript"></script>
+
+<Script>
+  document.addEventListener("DOMContentLoaded", async () => {
+    // 1) Load primary dropdown (CLUBS)
+    await loadPrimaryDropdown("#clubName", "/api/clubs",
+        data => data.clubs,
+        {
+            valueField: "id",
+            labelField: "name",
+            placeholder: "Select a club…"
+        }
+    );
+
+    // 2) Wire Club → Series dependency
+    createDependentDropdown("#clubName", "#seriesName", {
+        url: (clubId) => `/api/series/${clubId}`,
+        extract: (data) => data.series,
+        valueField: "id",
+        labelField: "name",
+        placeholder: "Select a series…"
+    });
+});
+</Script>
+
+</body>
+</html>
+
+

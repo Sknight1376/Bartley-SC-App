@@ -9,6 +9,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY . /app
 
+# RUN --mount=type=bind,src=.,dst=/app
+
+
 ENTRYPOINT ["python3"]
 CMD ["app.py"]
 
