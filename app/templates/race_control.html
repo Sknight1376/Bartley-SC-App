@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="static/js/jquery-3.6.3.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+</head>
+<body>
+
+<div class="lettering">QuickSail</div>
+
+<section class="banner">
+</section>
+
+<br>
+
+<div class="form-border">
+  <div style="display: flex; justify-content: center; gap: 50px; margin-bottom: 20px;">
+    <div>
+      <h3>Current Time</h3>
+      <div id="currentTime" style="font-size: 24px; font-weight: bold; color: #333;">--:--:--</div>
+    </div>
+    <div>
+      <h3>Elapsed Time</h3>
+      <div id="elapsedTime" style="font-size: 24px; font-weight: bold; color: #1331C5">00:00:00</div>
+    </div>
+  </div>
+  <div style="text-align: center; margin-bottom: 14px;">
+    <h3>Race Started At</h3>
+    <div id="raceStartTime" style="font-size: 20px; font-weight: bold; color: #1331C5;">Not started</div>
+  </div>
+
+
+<!-- Race Entries Table -->
+<section id="race-section" style="width:982px; margin:30px auto 0;">
+  <table id="race-table" class="entries-table" aria-live="polite" style="width:100%; border-collapse:collapse; background:#fff;">
+    <thead id="race-table-head">
+      <tr>
+        <th style="text-align:centre; border-top:0px; border-bottom:0px; padding:8px 10px; background:#e0e0e0;">Actions</th>
+        <th style="text-align:centre; border-top:0px; border-bottom:0px; padding:8px 10px; background:#e0e0e0;">Sailor</th>
+        <th style="text-align:centre; border-top:0px; border-bottom:0px; padding:8px 10px; background:#e0e0e0;">Boat</th>
+        <th style="text-align:centre; border-top:0px; border-bottom:0px; padding:8px 10px; background:#e0e0e0;">Sail #</th>
+        <th style="text-align:centre; border-top:0px; border-bottom:0px; padding:8px 10px; background:#e0e0e0;">Handicap</th>
+        <!-- Dynamic lap columns will be added here -->
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+</div>
+
+ <!-- Race Control Buttons -->
+  <div class ="form-footer" style="margin-bottom: 20px;">
+    <button id="startRaceBtn" class="blue-button" style="left: 0; right: auto;">Start Race</button>
+    <button id="endRaceBtn" class="blue-button" disabled>End Race</button>
+  </div>
+<script>
+
+</script>
+<script>
+document.addEventListener("DOMContentLoaded", async () => {
+  const baseUrl = window.location.origin; // static app URL base
+  // Elements
+  const currentTimeEl = document.getElementById('currentTime');
+  const elapsedTimeEl = document.getElementById('elapsedTime');
+  const raceStartTimeEl = document.getElementById('raceStartTime');
+  const startRaceBtn = document.getElementById('startRaceBtn');
+  const endRaceBtn = document.getElementById('endRaceBtn');
+  const raceTableBody = document.querySelector('#race-table tbody');
+
+  // Race state
+  let raceStartTime = null;
+  let raceEndTime = null;
+  let currentTimeInterval = null;
+  let elapsedTimeInterval = null;
+  let entries = [];
+  let raceActive = false;
+  let lapColumns = new Map(); // Map<name, {data: {entryIndex: {elapsedTime, correctedTime}}}>
+  let lapOrder = []; // Array of names in order added
+
+  // Load entries from session
+  async function loadEntries() {
+    try {
+      const res = await fetch(`/api/session/entries`, { cache: 'no-store' });
+      if (!res.ok) {
+        alert('No entries found. Please go back to entry summary.');
+        window.location.href = `/entry_summary`;
+        return;
+      }
+      const data = await res.json();
+      entries = data.entries || [];
+
+      // Sort by handicap ascending
+      entries.sort((a, b) => {
+        const handicapA = parseFloat(a.handicap) || 0;
+        const handicapB = parseFloat(b.handicap) || 0;
+        return handicapA - handicapB;
+      });
+
+      // Initialize entries with race data
+      entries.forEach((entry, index) => {
+        entry.position = index + 1;
+        entry.laps = [];
+        entry.finished = false;
+        entry.finalPosition = null;
+      });
+
+      renderTable();
+    } catch (e) {
+      console.error('Error loading entries:', e);
+      alert('Error loading entries.');
+    }
+  }
+
+  // Update current time
+  function updateCurrentTime() {
+    const now = new Date();
+    currentTimeEl.textContent = now.toLocaleTimeString();
+  }
+
+  function formatTimeHMSFromDate(d) {
+    return d.toLocaleTimeString();
+  }
+
+  // Update elapsed time
+  function updateElapsedTime() {
+    if (!raceStartTime) return;
+
+    const now = Date.now();
+    const elapsed = Math.floor((now - raceStartTime) / 1000);
+    elapsedTimeEl.textContent = formatTime(elapsed);
+  }
+
+  // Format seconds to HH:MM:SS
+  function formatTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+
+  // Convert HH:MM:SS to seconds
+  function timeToSeconds(timeStr) {
+    const [h, m, s] = timeStr.split(':').map(Number);
+    return h * 3600 + m * 60 + s;
+  }
+
+   // Calculate corrected time using handicap formula: (elapsed_time/1000) * handicap
+  function calculateCorrectedTime(elapsedSeconds, handicap) {
+    if (!handicap || handicap === 'N/A') return 'N/A';
+    const correctedSeconds = Math.round((elapsedSeconds * 1000) / parseFloat(handicap));
+    return formatTime(correctedSeconds);
+  }
+
+  // Log time to racemaster
+  async function logTime(boatkey, elapsedTime, correctedTime, isFinish) {
+    try {
+      const seriesRes = await fetch(`${baseUrl}/api/session/series`);
+      if (!seriesRes.ok) {
+        alert('No series found. Please go back to club entry.');
+        return;
+      }
+      const seriesData = await seriesRes.json();
+      const seriesId = seriesData.series_id;
+
+      const raceRes = await fetch(`${baseUrl}/api/next_race/${seriesId}`);
+      if (!raceRes.ok) throw new Error('Failed to get race number');
+      const raceData = await raceRes.json();
+      const raceNo = raceData.next_race;
+
+      const clubRes = await fetch(`${baseUrl}/api/session/club`);
+      const clubData = await clubRes.json();
+      const clubId = clubData.club_id;
+
+      const payload = {
+        boatkey: boatkey,
+        elapsed_time: elapsedTime,
+        corrected_time: correctedTime,
+        club_id: clubId,
+        series_id: seriesId,
+        race_no: raceNo,
+        is_finish: isFinish
+      };
+      const logRes = await fetch(`${baseUrl}/api/log_race_time`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!logRes.ok) throw new Error('Failed to log time');
+    } catch (e) {
+      console.error('Error logging time:', e);
+      alert('Error logging time to database.');
+    }
+  }
+
+  // Render the race table
+  function renderTable() {
+    const thead = document.getElementById('race-table-head');
+    const headerRow = thead.querySelector('tr');
+
+    // Clear existing dynamic columns (keep the first 5 and last 1)
+    while (headerRow.children.length > 5) {
+      headerRow.removeChild(headerRow.children[5]);
+    }
+
+    // Add dynamic lap columns after Handicap in reverse order (latest first)
+    const handicapTh = headerRow.querySelectorAll('th')[headerRow.querySelectorAll('th').length -1]; // 0:Actions, 1:Sailor, 2:Boat, 3:Sail#, 4:Handicap
+    lapOrder.slice().reverse().forEach((name, idx) => {
+      const th = document.createElement('th');
+      th.style.textAlign = 'centre';
+      th.style.borderTop = '0px';
+      th.style.borderBottom = '0px';
+      th.style.padding = '8px 10px';
+      th.style.background = '#e0e0e0';
+      th.textContent = name;
+      headerRow.insertBefore(th, handicapTh.nextSibling);
+    });
+
+    raceTableBody.innerHTML = '';
+
+    entries.forEach((entry, index) => {
+      const row = document.createElement('tr');
+
+      row.innerHTML = `
+        <td style="border-top:0px; border-bottom:3px solid #e0e0e0; padding:8px 10px; text-align:center; vertical-align: middle;">
+          ${!entry.finished ? `
+            <button class="lap-btn" data-index="${index}" style="margin-right:30px;">Lap</button>
+            <button class="finish-btn" data-index="${index}">Finish</button>
+          ` : '<span style="color: green; font-weight: bold;">FINISHED</span>'}
+        </td>
+        <td style="border-top:0px; border-bottom:3px solid #e0e0e0; padding:8px 10px;">${entry.sailor}</td>
+        <td style="border-top:0px; border-bottom:3px solid #e0e0e0; padding:8px 10px;">${entry.boat}</td>
+        <td style="border-top:0px; border-bottom:3px solid #e0e0e0; padding:8px 10px;">${entry.sailNumber}</td>
+        <td style="border-top:0px; border-bottom:3px solid #e0e0e0; padding:8px 10px; text-align:center;">${entry.handicap || 'N/A'}</td>
+        <!-- Dynamic lap cells will be added here -->
+      `;
+
+      // Find the Handicap td to insert dynamic cells after it
+      const cells = row.querySelectorAll('td');
+      const handicapCell = cells[4]; // 0:Actions, 1:Sailor, 2:Boat, 3:Sail#, 4:Handicap
+
+      // Add dynamic lap cells after Handicap in reverse order
+      lapOrder.slice().reverse().forEach((name, lapIdx) => {
+        const td = document.createElement('td');
+        td.style.borderTop = '0px';
+        td.style.borderBottom = '3px solid #e0e0e0';
+        td.style.padding = '8px 10px';
+        td.style.textAlign = 'center';
+        const lap = lapColumns.get(name);
+        const lapData = lap.data[index];
+        if (lapData) {
+          // Calculate position for this lap: rank among entries that have this lap
+          const entriesWithLap = entries.map((entry, idx) => ({ idx, data: lap.data[idx] })).filter(e => e.data).sort((a, b) => a.data.correctedTime.localeCompare(b.data.correctedTime));
+          const position = entriesWithLap.findIndex(e => e.idx === index) + 1;
+          td.innerHTML = `
+            <div style=" display: flex; align-items: center; justify-content: center; width: 100%; ">
+              <div>
+                <div style="font-size: larger; font-weight: bold;">${lapData.elapsedTime}</div>
+                <div style="font-size: smaller; color: #1331C5;">${lapData.correctedTime}</div>
+              </div>
+              <div style="font-size: 200%; font-weight: bold; text-align: center; width: 1.8em; height: 2em; display: flex; align-items: center; justify-content: center; color: #1331C5;">${position}</div>
+            </div>
+          `;
+        } else {
+          td.textContent = '-';
+        }
+        row.insertBefore(td, handicapCell.nextSibling);
+      });
+
+      raceTableBody.appendChild(row);
+    });
+
+    // Re-attach event listeners
+    attachButtonListeners();
+  }
+
+  // Attach event listeners to buttons
+  function attachButtonListeners() {
+    document.querySelectorAll('.lap-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const index = parseInt(e.target.dataset.index);
+        recordLap(index);
+      });
+    });
+
+    document.querySelectorAll('.finish-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const index = parseInt(e.target.dataset.index);
+        recordFinish(index);
+      });
+    });
+  }
+
+  // Record a lap
+  function recordLap(index) {
+    if (!raceActive) {
+      alert('Race has not started yet!');
+      return;
+    }
+
+    const entry = entries[index];
+    const now = Date.now();
+    const elapsedSeconds = Math.floor((now - raceStartTime) / 1000);
+    const elapsedTime = formatTime(elapsedSeconds);
+    const correctedTime = calculateCorrectedTime(elapsedSeconds, entry.handicap);
+
+    // Add lap data
+    entry.laps.push({
+      elapsedTime,
+      correctedTime,
+      timestamp: now
+    });
+
+    // Log to database
+    logTime(entry.key, elapsedTime, correctedTime, false);
+
+    // Add to lap columns
+    const lapNumber = entry.laps.length;
+    const name = `Lap ${lapNumber}`;
+    if (!lapColumns.has(name)) {
+      lapColumns.set(name, { data: {} });
+      lapOrder.push(name);
+    }
+    lapColumns.get(name).data[index] = { elapsedTime, correctedTime };
+
+    renderTable();
+  }
+
+  // Record finish
+  function recordFinish(index) {
+    if (!raceActive) {
+      alert('Race has not started yet!');
+      return;
+    }
+
+    const entry = entries[index];
+    const now = Date.now();
+    const elapsedSeconds = Math.floor((now - raceStartTime) / 1000);
+    const elapsedTime = formatTime(elapsedSeconds);
+    const correctedTime = calculateCorrectedTime(elapsedSeconds, entry.handicap);
+
+    // Add final lap data
+    entry.laps.push({
+      elapsedTime,
+      correctedTime,
+      timestamp: now,
+      isFinish: true
+    });
+
+    entry.finished = true;
+
+    // Log to database
+    logTime(entry.key, elapsedTime, correctedTime, true);
+
+    // Add to lap columns
+    const name = 'Finish';
+    if (!lapColumns.has(name)) {
+      lapColumns.set(name, { data: {} });
+      lapOrder.push(name);
+    }
+    lapColumns.get(name).data[index] = { elapsedTime, correctedTime };
+
+    renderTable();
+  }
+
+  // Update positions (no reordering, just assign based on current order)
+  function updatePositions() {
+    // No sorting - keep order fixed by initial handicap
+    entries.forEach((entry, index) => {
+      entry.position = index + 1;
+    });
+  }
+
+  // Start race
+  startRaceBtn.addEventListener('click', () => {
+    if (entries.length === 0) {
+      alert('No entries loaded!');
+      return;
+    }
+
+    raceStartTime = Date.now();
+    raceStartTimeEl.textContent = formatTimeHMSFromDate(new Date(raceStartTime));
+    raceActive = true;
+    lapColumns = new Map(); // Reset lap columns
+    lapOrder = []; // Reset lap order
+
+    startRaceBtn.disabled = true;
+    endRaceBtn.disabled = false;
+
+    // Start elapsed time timer
+    elapsedTimeInterval = setInterval(updateElapsedTime, 1000);
+
+    alert('Race started!');
+  });
+
+  // End race
+  endRaceBtn.addEventListener('click', () => {
+    if (!raceActive) return;
+
+    raceEndTime = Date.now();
+    raceActive = false;
+
+    clearInterval(elapsedTimeInterval);
+
+    startRaceBtn.disabled = false;
+    endRaceBtn.disabled = true;
+
+    // Mark all unfinished boats as DNF
+    entries.forEach(entry => {
+      if (!entry.finished) {
+        entry.finished = true;
+        entry.dnf = true;
+      }
+    });
+
+    if (raceStartTime) {
+      raceStartTimeEl.textContent = `${formatTimeHMSFromDate(new Date(raceStartTime))} (ended ${formatTimeHMSFromDate(new Date(raceEndTime))})`;
+    }
+
+    updatePositions();
+    renderTable();
+
+    alert('Race ended!');
+  });
+
+  // Initialize
+  async function init() {
+    updateCurrentTime();
+    currentTimeInterval = setInterval(updateCurrentTime, 1000);
+    await loadEntries();
+  }
+  init();
+});
+</script>
+
+<script type="text/javascript" src="{{ url_for('static', filename='js/main.js')}}"></script>
+
+</body>
+</html>

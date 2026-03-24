@@ -175,7 +175,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     try {
       await postEntries(entries);
-      window.location.href = '/summary';
+      window.location.href = '/entry_summary';
     } catch (e) {
       console.error('Failed to submit entries:', e);
       alert(e.message || 'Failed to submit entries.');

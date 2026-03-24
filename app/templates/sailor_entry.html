@@ -22,7 +22,7 @@
   </div>
   <br>
   <h4 style="color: #979797">Step Two</h4>
-  <h2>Boat and Sailor Details></Details></h2>
+  <h2>Boat and Sailor Details</h2>
   <h4 style="color: #979797">Add the race entries</h4>
   <form class="form-inline">
       
@@ -65,6 +65,7 @@
 <script>
 document.addEventListener("DOMContentLoaded", async () => {
   // 0) Page elements
+  const baseUrl = window.location.origin; // static app address base
   const clubId = {{ clubId | tojson }};
   const addBtn = document.getElementById('addentry');
   const summaryBtn = document.getElementById('summaryButton');
@@ -90,17 +91,41 @@ document.addEventListener("DOMContentLoaded", async () => {
   enableButtonWhenAllSelected('#summaryButton', ['#Name', '#Boat']);
 
   // 2) Add row when Add is clicked
-  function appendRow({ sailor, boat, sailNumber }) {
+  function appendRow({ sailor, boat, sailNumber, handicap, key }) {
     const tbody = document.querySelector('#entries-table tbody');
     if (!tbody) return;
 
     const tr = document.createElement('tr');
+    tr.dataset.handicap = handicap; // Store handicap value in dataset
+    tr.dataset.key = key; // Store boat key
     tr.innerHTML = `
       <td style="border:1px solid #979797; padding:8px 10px;">${sailor}</td>
       <td style="border:1px solid #979797; padding:8px 10px;">${boat}</td>
       <td style="border:1px solid #979797; padding:8px 10px;">${sailNumber}</td>
     `;
     tbody.appendChild(tr);
+  }
+
+  // Load existing entries from session on page load
+  async function loadExistingEntries() {
+    try {
+      const res = await fetch(`/api/session/entries`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const existingEntries = data.entries || [];
+        for (const entry of existingEntries) {
+          appendRow({
+            sailor: entry.sailor,
+            boat: entry.boat,
+            sailNumber: entry.sailNumber,
+            handicap: entry.handicap || '',
+            key: entry.key || ''
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Error loading existing entries:', e);
+    }
   }
 
   addBtn?.addEventListener('click', () => {
@@ -122,7 +147,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    appendRow({ sailor: sailorText, boat: b.boat, sailNumber: b.sailNumber });
+    appendRow({ sailor: sailorText, boat: b.boat, sailNumber: b.sailNumber, handicap: b.handicap, key: b.key });
   });
 
   // 3) Collect + POST when Summary is clicked
@@ -133,14 +158,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       return {
         sailor: (cells[0]?.textContent || '').trim(),
         boat: (cells[1]?.textContent || '').trim(),
-        sailNumber: (cells[2]?.textContent || '').trim()
-        // If you later add a Key column, include: key: (cells[3]?.textContent || '').trim()
+        sailNumber: (cells[2]?.textContent || '').trim(),
+        handicap: tr.dataset.handicap || '',
+        key: tr.dataset.key || ''
       };
     }).filter(e => e.sailor && e.boat && e.sailNumber);
   }
 
   async function postEntries(entries) {
-    const res = await fetch('/api/entries', {
+    const res = await fetch(`/api/entries`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',
@@ -161,18 +187,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     try {
       await postEntries(entries);
-      window.location.href = `/summary?${params.toString()`;
+      window.location.href = `/entry_summary`;
     } catch (e) {
       console.error('Failed to submit entries:', e);
       alert(e.message || 'Failed to submit entries.');
     }
   });
+
+  // Load any existing entries when page loads
+  await loadExistingEntries();
 });
 </script>
 
 <script type="text/javascript" src="{{ url_for('static', filename='js/main.js')}}"></script>
 
-<script type="text/javascript"></script>
 
 </body>
 </html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="static/js/jquery-3.6.3.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+</head>
+<body>
+
+<div class="lettering">QuickSail</div>
+
+<section class="banner">
+</section>
+
+<br>
+
+<div class="form-border">
+  <div class="entry-banner">
+    <div style="color: #ffffff; text-align: center; line-height: 40px; background: #D7D9FD;">1. Entry</div>
+    <div style="color: #ffffff; text-align: center; line-height: 40px; background: #D7D9FD;">2. Sailor</div>
+    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color: #ffffff; text-align: center; line-height: 40px;">3. Summary</div>
+  </div>
+  <br>
+  <h4 style="color: #979797">Step Three</h4>
+  <h2>Entry Summary</h2>
+  <h4 style="color: #979797">Review entries and handicaps</h4>
+</div>
+
+<!-- Summary Table -->
+<section id="summary-section" style="width:990px; margin:30px auto 0;">
+  <table id="summary-table" class="entries-table" aria-live="polite" style="width:100%; border-collapse:collapse; background:#fff;">
+    <thead>
+      <tr>
+        <th style="text-align:centre; border:1px solid #979797; padding:8px 10px;">Sailor</th>
+        <th style="text-align:centre; border:1px solid #979797; padding:8px 10px;">Boat</th>
+        <th style="text-align:centre; border:1px solid #979797; padding:8px 10px;">Sail #</th>
+        <th style="text-align:centre; border:1px solid #979797; padding:8px 10px;">Handicap</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<!-- Navigation Buttons -->
+<div class="form-footer" style="display: flex; gap: 20px; justify-content: center;">
+  <button id="backBtn" class="blue-button" style="left: 0; right: auto;">> Add More Entries</button>
+  <button id="proceedBtn" class="blue-button">> Proceed to Race Control</button>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", async () => {
+  const baseUrl = window.location.origin; // static app URL base
+  // Get entries from session/query params
+  const entries = await getEntriesFromSession();
+  const summaryTbody = document.querySelector('#summary-table tbody');
+  const backBtn = document.getElementById('backBtn');
+  const proceedBtn = document.getElementById('proceedBtn');
+
+  if (!entries || entries.length === 0) {
+    alert('No entries found. Returning to entry page.');
+      window.location.href = `/entry_sailor`;
+    return;
+  }
+
+  // Populate summary table with handicaps
+  async function populateSummary() {
+    try {
+      for (const entry of entries) {
+        // Handicap is already included in the entry data
+        appendSummaryRow({
+          sailor: entry.sailor,
+          boat: entry.boat,
+          sailNumber: entry.sailNumber,
+          handicap: entry.handicap || 'N/A'
+        });
+      }
+    } catch (e) {
+      console.error('Error populating summary:', e);
+      alert('Error loading handicaps.');
+    }
+  }
+
+
+  function appendSummaryRow({ sailor, boat, sailNumber, handicap }) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="border:1px solid #979797; padding:8px 10px;">${sailor}</td>
+      <td style="border:1px solid #979797; padding:8px 10px;">${boat}</td>
+      <td style="border:1px solid #979797; padding:8px 10px;">${sailNumber}</td>
+      <td style="border:1px solid #979797; padding:8px 10px; text-align:center;">${handicap}</td>
+    `;
+    summaryTbody.appendChild(tr);
+  }
+
+  // Back button - return to entry page with entries persisted
+  backBtn?.addEventListener('click', () => {
+    // Entries remain in session, just navigate back
+    window.location.href = '/entry_sailor';
+  });
+
+  // Proceed button - navigate to race control
+  proceedBtn?.addEventListener('click', async () => {
+    try {
+      // Save entries before proceeding
+      const res = await fetch('/api/entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ entries })
+      });
+      if (!res.ok) {
+        throw new Error('Failed to save entries');
+      }
+      window.location.href = `/race_control`;
+    } catch (e) {
+      console.error('Error proceeding:', e);
+      alert('Error saving entries.');
+    }
+  });
+
+  // Load and display entries
+  await populateSummary();
+});
+
+// Helper function to retrieve entries from session
+async function getEntriesFromSession() {
+  try {
+    const res = await fetch(`/api/session/entries`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.entries || null;
+  } catch (e) {
+    console.error('Error retrieving entries:', e);
+    return null;
+  }
+}
+</script>
+
+<script type="text/javascript" src="{{ url_for('static', filename='js/main.js')}}"></script>
+
+</body>
+</html>
+
+
