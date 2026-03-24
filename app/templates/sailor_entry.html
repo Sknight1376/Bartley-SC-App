@@ -15,56 +15,164 @@
   <br>
 
 <div class = "form-border">
-    <div class = "entry-banner">
+  <div class = "entry-banner">
     <div style="color: #ffffff; text-align: center; line-height: 40px; background: #D7D9FD;">1. Entry</div>
     <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color: #ffffff; text-align: center; line-height: 40px;">2. Sailor</div>
     <div style="color: #979797; text-align: center; line-height: 40px;">3. Summary</div>
-    </div>
-    <br>
-<h4 style="color: #979797">Step Two</h4>
-<h2>Boat and Sailor Details></Details></h2>
-<h4 style="color: #979797">Add the race entries</h4>
+  </div>
+  <br>
+  <h4 style="color: #979797">Step Two</h4>
+  <h2>Boat and Sailor Details></Details></h2>
+  <h4 style="color: #979797">Add the race entries</h4>
   <form class="form-inline">
+      
     <div style="vertical-align: middle; padding-left: 110px; padding-right: 110px;">
-    <label for="clubName" style = "color: black;">Club</label>
-      <select id="clubName" aria-label="Select club"></select>
+      <label for="Name" style = "color: black;">Sailor Name</label>
+      <select id="Name" aria-label="Select sailor"></select>
     </div>
 
     <div style="vertical-align: middle;">
-    <label for="clubName" style = "color: black;">Series</label>
-    <select id="seriesName" aria-label="Select series" disabled>
-    </select>
+      <label for="Boat" style = "color: black;">Series</label>
+      <select id="Boat" aria-label="Select Boat" disabled></select>
     </div>
+
   </form>
 
+  <button id="addentry" class="blue-button" style="position: static; margin-top: 25px">> Add Sailor</button>
+
+</div>
+
+<div class = form-footer>
+  <button id="summaryButton" class="blue-button" disabled>> Summary</button>
+</div>
 
 
-<script type="text/javascript" src="{{ url_for('static', filename='js/test.js')}}"></script>
+<!-- ▼ NEW: entries table below the bordered form -->
+<section id="entries-section" style="width:990px; margin:30px auto 0;">
+  <table id="entries-table" class="entries-table" aria-live="polite" style="width:100%; border-collapse:collapse; background:#fff;">
+    <thead>
+      <tr>
+        <th style="text-align:centre; border:1px solid #979797; padding:8px 10px;">Sailor</th>
+        <th style="text-align:centre;; border:1px solid #979797; padding:8px 10px;">Boat</th>
+        <th style="text-align:centre;; border:1px solid #979797; padding:8px 10px;">Sail #</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", async () => {
+  // 0) Page elements
+  const clubId = {{ clubId | tojson }};
+  const addBtn = document.getElementById('addentry');
+  const summaryBtn = document.getElementById('summaryButton');
+  const sailorSelect = document.getElementById('Name');
+  const boatSelect = document.getElementById('Boat');
+
+  // 1) Populate dropdowns
+  await loadPrimaryDropdown(
+    "#Name",
+    `/api/name/${clubId}`,
+    data => data.names,
+    { valueField: "id", labelField: "name", placeholder: "Select a Sailor" }
+  );
+  createDependentDropdown("#Name", "#Boat", {
+    url: (sailorId) => `/api/boat/${sailorId}`,
+    extract: (data) => data.boats,
+    valueField: "id",
+    labelField: "name",
+    placeholder: "Select a Boat"
+  });
+
+  // Enable Summary only when both selects chosen
+  enableButtonWhenAllSelected('#summaryButton', ['#Name', '#Boat']);
+
+  // 2) Add row when Add is clicked
+  function appendRow({ sailor, boat, sailNumber }) {
+    const tbody = document.querySelector('#entries-table tbody');
+    if (!tbody) return;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="border:1px solid #979797; padding:8px 10px;">${sailor}</td>
+      <td style="border:1px solid #979797; padding:8px 10px;">${boat}</td>
+      <td style="border:1px solid #979797; padding:8px 10px;">${sailNumber}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  addBtn?.addEventListener('click', () => {
+    const sailorText = sailorSelect.options[sailorSelect.selectedIndex]?.text?.trim();
+    const boatRaw = boatSelect.value;
+
+    if (!sailorText || !boatRaw) {
+      alert('Please select a Sailor and a Boat');
+      return;
+    }
+
+    let b;
+    try {
+      // Boat <option>.value contains JSON (because main.js serializes objects)
+      b = JSON.parse(boatRaw); // -> { key, sailNumber, boat }
+    } catch (e) {
+      console.error('Invalid Boat value (expected JSON):', boatRaw, e);
+      alert('Boat option value is invalid.');
+      return;
+    }
+
+    appendRow({ sailor: sailorText, boat: b.boat, sailNumber: b.sailNumber });
+  });
+
+  // 3) Collect + POST when Summary is clicked
+  function collectEntriesFromTable() {
+    const rows = Array.from(document.querySelectorAll('#entries-table tbody tr'));
+    return rows.map(tr => {
+      const cells = tr.querySelectorAll('td');
+      return {
+        sailor: (cells[0]?.textContent || '').trim(),
+        boat: (cells[1]?.textContent || '').trim(),
+        sailNumber: (cells[2]?.textContent || '').trim()
+        // If you later add a Key column, include: key: (cells[3]?.textContent || '').trim()
+      };
+    }).filter(e => e.sailor && e.boat && e.sailNumber);
+  }
+
+  async function postEntries(entries) {
+    const res = await fetch('/api/entries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify({ entries })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Server error: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  summaryBtn?.addEventListener('click', async () => {
+    const entries = collectEntriesFromTable();
+    if (!entries.length) {
+      alert('Please add at least one entry before continuing.');
+      return;
+    }
+    try {
+      await postEntries(entries);
+      window.location.href = `/summary?${params.toString()`;
+    } catch (e) {
+      console.error('Failed to submit entries:', e);
+      alert(e.message || 'Failed to submit entries.');
+    }
+  });
+});
+</script>
+
+<script type="text/javascript" src="{{ url_for('static', filename='js/main.js')}}"></script>
 
 <script type="text/javascript"></script>
-
-<Script>
-  document.addEventListener("DOMContentLoaded", async () => {
-    // 1) Load primary dropdown (CLUBS)
-    await loadPrimaryDropdown("#clubName", "/api/clubs",
-        data => data.clubs,
-        {
-            valueField: "id",
-            labelField: "name",
-            placeholder: "Select a club…"
-        }
-    );
-
-    // 2) Wire Club → Series dependency
-    createDependentDropdown("#clubName", "#seriesName", {
-        url: (clubId) => `/api/series/${clubId}`,
-        extract: (data) => data.series,
-        valueField: "id",
-        labelField: "name",
-        placeholder: "Select a series…"
-    });
-});
-</Script>
 
 </body>
 </html>

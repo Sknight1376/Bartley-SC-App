@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, session
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
@@ -8,27 +8,13 @@ from handicaps.calculations import handicap_calculations
 from handicaps.conversions import time_conversions
 
 
-import hashlib
-import re
-
-def normalise(name) -> str:
-    name = "" if name is None else str(name)
-    name = name.strip()
-    name = re.sub(r"\s+", " ", name)
-    return name
-
-def create_key(name: str) -> int:
-    norm = normalise(name)
-    digest = hashlib.sha256(norm.encode("utf-8")).digest()
-    key64 = int.from_bytes(digest[:8], "big", signed=False)
-    return key64 & ((1 << 63) - 1)
 
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://dwh:DBTTEST@db:5432/dwh"
 app.app_context().push()
 db = SQLAlchemy(app)
-
+app.secret_key = "4001376"
 db.Model.metadata.reflect(db.engine, schema='RACINGAPP')
 
 class Boats(db.Model):
@@ -46,9 +32,21 @@ class ClubControl(db.Model):
 class SeriesControl(db.Model):
     __table__ = db.metadata.tables["RACINGAPP.SERIESCONTROL"]
 
+# Reflected SAILORCONTROL
+class SailorControl(db.Model):
+    __table__ = db.metadata.tables["RACINGAPP.SAILORCONTROL"]
+
+
+# Reflected BOATCONTROL
+class BoatControl(db.Model):
+    __table__ = db.metadata.tables["RACINGAPP.BOATCONTROL"]
+
 # >>> SET THIS to your real sequence name (schema/case sensitive)
 # Example: '"RACINGAPP"."KEY"'
 KEYUENCE = '"RACINGAPP"."key"'
+
+
+
 
 handicaps = Boats.query.all()
 
@@ -67,37 +65,6 @@ def parse_hms_to_time(s: str):
     return datetime.strptime(f"{h:02d}:{m:02d}:{sec:02d}", "%H:%M:%S").time()
 
 
-def get_or_create_club_id(club_name: str) -> int:
-    club_name = normalise(club_name)
-    if not club_name:
-        raise ValueError("Empty club_name")
-
-    stmt = text("""
-        INSERT INTO "RACINGAPP"."CLUBCONTROL" (name)
-        VALUES (:name)
-        RETURNING key
-    """)
-
-    with db.engine.begin() as conn:
-        return int(conn.execute(stmt, {"name": club_name}).scalar())
-
-
-def get_or_create_series_id(series_name: str, club: str | None = None) -> int:
-    series_name = normalise(series_name)
-    club = normalise(club) if club else None
-
-   
-
-    # Assumes you added: UNIQUE (year, name)
-    stmt = text("""
-        INSERT INTO "RACINGAPP"."SERIESCONTROL" (name, club)
-        VALUES (:name, :club)
-        RETURNING key
-    """)
-
-    with db.engine.begin() as conn:
-        return int(conn.execute(stmt, {"name": series_name, "club": club}).scalar())
-
 
 # ---------- routes ----------
 
@@ -108,9 +75,22 @@ def club_entry():
 
 @app.route("/sailor_entry")
 def sailor_entry():
+    clubId = request.args.get('clubName')
     # Boat list not strictly needed for race now (entries come from sessionStorage),
     # but we pass it anyway in case you want it later.
-    return render_template("sailor_entry.html")
+    return render_template("sailor_entry.html", clubId=clubId)
+
+
+# @app.route("/summary")
+# def summary():
+#     # ... your existing code ...
+#     pending = session.get("pending_entries", [])
+#     # You can pass 'pending' to the template for display if you want
+#     return render_template("summary.html",
+#                            start=start, end=end, duration=duration,
+#                            entry_count=entry_count, results=results,
+#                            club_name=club_name, series_name=series_name, race=race_no,
+#                            pending=pending)
 
 @app.route("/race")
 def race():
@@ -255,6 +235,9 @@ def summary():
                            entry_count=entry_count, results=results,
                            club_name=club_name, series_name=series_name, race=race_no)
 
+
+
+
 @app.get("/api/clubs")
 def api_get_club():
     clubcontrol = ClubControl.query.with_entities(ClubControl.name, ClubControl.key).all()
@@ -268,8 +251,40 @@ def api_get_series(club_id):
     series = [{"id": b.key, "name": b.name} for b in seriescontrol]
     return jsonify(series=series)
 
+@app.get("/api/name/<club_id>")
+def api_get_sailorname(club_id):
+    sailorcontrol = SailorControl.query.with_entities(SailorControl.fullname, SailorControl.key).filter_by(club=club_id)
+    names = [{"id": b.key, "name": b.fullname} for b in sailorcontrol]
+    return jsonify(names=names)
+
+@app.get("/api/boat/<sailor_id>")
+def api_get_boat(sailor_id):
+    boatcontrol = BoatControl.query\
+        .join(Boats, BoatControl.boat==Boats.key).with_entities(Boats.boat, BoatControl.key, BoatControl.sail_number).filter(BoatControl.sailor==sailor_id)
+    boats = [{"id": {"key":b.key, "sailNumber":b.sail_number, "boat":b.boat}, "name": b.boat +" "+ b.sail_number} for b in boatcontrol]
+    return jsonify(boats=boats)
 
 
+@app.post("/api/entries")
+def api_entries():
+    payload = request.get_json(silent=True) or {}
+    entries = payload.get("entries") or []
+    # Basic validation
+    cleaned = []
+    for e in entries:
+        sailor = (e.get("sailor") or "").strip()
+        boat = (e.get("boat") or "").strip()
+        sailnum = (e.get("sailNumber") or "").strip()
+        # key = (e.get("key") or "").strip()
+        if sailor and boat and sailnum:
+            cleaned.append({"sailor": sailor, "boat": boat, "sailNumber": sailnum})
+
+    if not cleaned:
+        return jsonify({"ok": False, "error": "No valid entries provided"}), 400
+
+    # Store in session for the next step (swap to DB later if you prefer)
+    session["pending_entries"] = cleaned
+    return jsonify({"ok": True, "count": len(cleaned)})
 
 
 if __name__ == "__main__":
