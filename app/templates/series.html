@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="static/js/jquery-3.6.3.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+  <style>
+    .series-wrap { width: 990px; margin: 20px auto; }
+    .series-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .series-card h3 { margin: 0 0 12px; color: #1331C5; }
+    .row { display:flex; gap:12px; align-items:end; }
+    .field { flex:1; }
+    .field label { display:block; font-size:13px; margin-bottom:4px; color:#444; }
+    .field input { width:100%; height:36px; border:1px solid #d0d0d0; border-radius:6px; padding:0 10px; }
+    .btn { background:#1331C5; color:#fff; border:0; border-radius:6px; height:36px; padding:0 14px; cursor:pointer; }
+    .btn.secondary { background:#6b7280; }
+    .series-table { width:100%; border-collapse: collapse; background:#fff; }
+    .series-table th { background:#e0e0e0; padding:8px 10px; border-bottom:2px solid #d0d0d0; text-align:left; }
+    .series-table td { padding:8px 10px; border-bottom:1px solid #ececec; }
+    .small-input { height:30px; border:1px solid #d0d0d0; border-radius:6px; padding:0 8px; }
+  </style>
+</head>
+<body>
+
+<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
+<section class="banner"></section>
+<br>
+
+<div class="form-border" style="text-align:center;">
+  <h4 style="color:#979797">Club Administration</h4>
+  <h2>Series Management</h2>
+  <h4 style="color:#979797">{{ clubName }}</h4>
+</div>
+
+<div class="series-wrap">
+  <div class="series-card">
+    <h3>Add New Series</h3>
+    <div class="row">
+      <div class="field">
+        <label for="newSeriesName">Series Name</label>
+        <input id="newSeriesName" type="text" placeholder="e.g. Spring Series">
+      </div>
+      <div class="field" style="max-width:180px;">
+        <label for="newSeriesYear">Year</label>
+        <input id="newSeriesYear" type="text" placeholder="e.g. 2026">
+      </div>
+      <button id="addSeriesBtn" class="btn">Add Series</button>
+    </div>
+  </div>
+
+  <table class="series-table">
+    <thead>
+      <tr>
+        <th style="width:45%;">Series Name</th>
+        <th style="width:20%;">Year</th>
+        <th style="width:35%;">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="seriesBody"></tbody>
+  </table>
+</div>
+
+<div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
+  <button class="blue-button" onclick="window.location.href='/landing'">Back to Landing</button>
+</div>
+
+<script>
+let seriesRows = [];
+
+function esc(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+async function loadSeries() {
+  const res = await fetch('/api/series/manage', { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to load series');
+  }
+  seriesRows = data.series || [];
+  renderSeries();
+}
+
+function renderSeries() {
+  const tbody = document.getElementById('seriesBody');
+  tbody.innerHTML = '';
+
+  seriesRows.forEach(s => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input id="name-${s.key}" class="small-input" style="width:95%;" value="${esc(s.name)}"></td>
+      <td><input id="year-${s.key}" class="small-input" style="width:90%;" value="${esc(s.year)}"></td>
+      <td>
+        <button class="btn secondary" onclick="saveSeries(${s.key})">Save</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  if (seriesRows.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="3" style="color:#888;">No series created yet.</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+async function addSeries() {
+  const name = document.getElementById('newSeriesName').value.trim();
+  const year = document.getElementById('newSeriesYear').value.trim();
+
+  if (!name || !year) {
+    alert('Series name and year are required.');
+    return;
+  }
+
+  const res = await fetch('/api/series/manage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, year })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to add series');
+    return;
+  }
+
+  document.getElementById('newSeriesName').value = '';
+  document.getElementById('newSeriesYear').value = '';
+  await loadSeries();
+}
+
+async function saveSeries(seriesId) {
+  const name = document.getElementById(`name-${seriesId}`).value.trim();
+  const year = document.getElementById(`year-${seriesId}`).value.trim();
+
+  if (!name || !year) {
+    alert('Series name and year are required.');
+    return;
+  }
+
+  const res = await fetch(`/api/series/manage/${seriesId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, year })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to save series');
+    return;
+  }
+
+  await loadSeries();
+}
+
+document.getElementById('addSeriesBtn').addEventListener('click', addSeries);
+
+(async function init() {
+  try {
+    await loadSeries();
+  } catch (e) {
+    alert(e.message || 'Failed to load page');
+  }
+})();
+</script>
+
+</body>
+</html>

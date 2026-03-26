@@ -6,7 +6,7 @@
 </head>
 <body>
 
-<div class="lettering">QuickSail</div>
+<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
 
 
 <section class="banner">
@@ -23,17 +23,17 @@
     <br>
 <h4 style="color: #979797">Step One</h4>
 <h2>Club Details</h2>
-<h4 style="color: #979797">Find the correct club and series for your race</h4>
+<h4 style="color: #979797">Your club is identified from login. Select the series for this race.</h4>
   <form class="form-inline">
-    <div style="vertical-align: middle; padding-left: 110px; padding-right: 110px;">
-    <label for="clubName" style = "color: black;">Club</label>
-      <select id="clubName" aria-label="Select club"></select>
-
-    <!-- <datalist id="clubNameList"></datalist> -->
+    <div style="vertical-align: middle; padding-left: 110px; padding-right: 110px; width:100%;">
+      <label style="color: black;">Club</label>
+      <div id="clubNameDisplay" style="padding:10px 12px; border:1px solid #d0d0d0; border-radius:6px; background:#f7f8ff;">
+        {{ clubName or 'Unknown Club' }}
+      </div>
     </div>
 
     <div style="vertical-align: middle;">
-    <label for="clubName" style = "color: black;">Series</label>
+    <label for="seriesName" style = "color: black;">Series</label>
     <select id="seriesName" aria-label="Select series" disabled>
     </select>
 
@@ -50,47 +50,35 @@
 
 <Script>
   document.addEventListener("DOMContentLoaded", async () => {
-    // 1) Load primary dropdown (CLUBS)
-    await loadPrimaryDropdown("#clubName", "/api/clubs",
-        data => data.clubs,
-        {
-            valueField: "id",
-            labelField: "name",
-            placeholder: "Select a club…"
-        }
-    );
+    const clubId = {{ clubId | tojson }};
 
-    // 2) Wire Club → Series dependency
-    createDependentDropdown("#clubName", "#seriesName", {
-        url: (clubId) => `/api/series/${clubId}`,
-        extract: (data) => data.series,
+    // Load series for logged-in club
+    await loadPrimaryDropdown("#seriesName", `/api/series/${clubId}`,
+      data => data.series,
+      {
         valueField: "id",
         labelField: "name",
         placeholder: "Select a series…"
-    });
-});
+      }
+    );
+  });
 </Script>
 
 <script>
   
 
 document.addEventListener("DOMContentLoaded", () => {
+  const clubId = {{ clubId | tojson }};
     
-    // Your existing loaders:
-    // loadPrimaryDropdown(...)
-    // createDependentDropdown(...)
-
     // Enable Next button only when required selects are chosen
     enableButtonWhenAllSelected("#nextButton", [
-        "#clubName",
         "#seriesName"
     ]);
 
     // On click: go to next page
     document.querySelector("#nextButton").addEventListener("click", async () => {
-        const clubSelect = document.querySelector("#clubName");
         const seriesSelect = document.querySelector("#seriesName");
-        const selectedClubId = clubSelect.value;
+    const selectedClubId = clubId;
         const selectedSeriesId = seriesSelect.value;
 
         if (!selectedClubId || !selectedSeriesId) {
@@ -128,10 +116,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 enableButtonWhenAllSelected("#nextButton", [
-    "#clubName",
-    "#seriesName",
-    "#boatSelect",
-    "#laneSelect"
+  "#seriesName"
 ]);
 
 </script>

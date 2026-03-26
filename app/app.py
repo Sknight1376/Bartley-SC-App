@@ -55,18 +55,415 @@ def parse_hms_to_seconds(s: str):
 # ---------- routes ----------
 
 @app.route("/")
-def club_entry():
-    # Clear any pending entries when returning to club entry page
-    # This ensures entries are reset if user changes club/series
+def intro_page():
+    return render_template("intro.html")
+
+
+@app.get("/login")
+def login_page():
+    # Clear race state on explicit return to login
     session.pop("race", None)
-    session.pop("club_id", None)
     session.pop("series_id", None)
-    return render_template("club_entry.html")
+    return render_template("login.html")
+
+
+@app.post("/api/login")
+def api_login():
+    payload = request.get_json(silent=True) or {}
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+
+    if not username or not password:
+        return jsonify({"ok": False, "error": "Missing username or password"}), 400
+
+    try:
+        with db.engine.connect() as conn:
+            user_row = conn.execute(
+                text('''
+                    SELECT cu.key AS user_id,
+                           cu.username,
+                           cc.key AS club_id,
+                           cc.name AS club_name
+                    FROM "RACINGAPP"."CLUBUSER" cu
+                    JOIN "RACINGAPP"."CLUBCONTROL" cc ON cc.key = cu.club
+                    WHERE LOWER(cu.username) = LOWER(:username)
+                      AND cu.is_active = TRUE
+                      AND cu.password_hash = crypt(:password, cu.password_hash)
+                    LIMIT 1
+                '''),
+                {"username": username, "password": password}
+            ).mappings().first()
+
+            if user_row:
+                conn.execute(
+                    text('UPDATE "RACINGAPP"."CLUBUSER" SET last_login = CURRENT_TIMESTAMP WHERE key = :user_id'),
+                    {"user_id": user_row["user_id"]}
+                )
+                conn.commit()
+
+        if not user_row:
+            return jsonify({"ok": False, "error": "Invalid username or password"}), 401
+
+        session["user_id"] = str(user_row["user_id"])
+        session["username"] = user_row["username"]
+        session["club_id"] = str(user_row["club_id"])
+        session["club_name"] = user_row["club_name"]
+        race_data = session.get("race", {})
+        race_data["club_id"] = str(user_row["club_id"])
+        session["race"] = race_data
+
+        return jsonify({
+            "ok": True,
+            "club_id": str(user_row["club_id"]),
+            "club_name": user_row["club_name"],
+            "username": user_row["username"]
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/logout")
+def api_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+
+@app.get("/landing")
+def landing_page():
+    club_id = session.get("club_id")
+    club_name = session.get("club_name")
+    if not club_id:
+        return redirect("/login")
+    return render_template("landing.html", clubName=club_name, username=session.get("username"))
+
+
+@app.get("/members")
+def members_page():
+    if not session.get("club_id"):
+        return redirect("/login")
+    return render_template("members.html", clubName=session.get("club_name"))
+
+
+@app.get("/api/members")
+def api_get_members():
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            rows = conn.execute(
+                text('''
+                    SELECT sc.key AS sailor_id,
+                           sc.fullname,
+                           sc.firstname,
+                           sc.lastname,
+                           bc.key AS boat_key,
+                           bc.sail_number,
+                           hc.boat AS boat_name,
+                           hc.handicap
+                    FROM "RACINGAPP"."SAILORCONTROL" sc
+                    LEFT JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.sailor = sc.key
+                    LEFT JOIN "RACINGAPP"."HANDICAPCONTROL" hc ON hc.key = bc.boat
+                    WHERE sc.club = :club_id
+                    ORDER BY sc.fullname, bc.key
+                '''),
+                {"club_id": club_id}
+            ).mappings().all()
+
+        members = {}
+        for r in rows:
+            sid = str(r["sailor_id"])
+            if sid not in members:
+                members[sid] = {
+                    "id": r["sailor_id"],
+                    "full_name": r["fullname"],
+                    "first_name": r["firstname"],
+                    "last_name": r["lastname"],
+                    "boats": []
+                }
+            if r["boat_key"] is not None:
+                members[sid]["boats"].append({
+                    "boat_key": r["boat_key"],
+                    "boat": r["boat_name"],
+                    "sail_number": r["sail_number"],
+                    "handicap": r["handicap"]
+                })
+
+        return jsonify({"ok": True, "members": list(members.values())})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/members")
+def api_create_member():
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    first_name = (payload.get("first_name") or "").strip()
+    last_name = (payload.get("last_name") or "").strip()
+    if not first_name:
+        return jsonify({"ok": False, "error": "first_name is required"}), 400
+
+    full_name = f"{first_name} {last_name}".strip()
+
+    try:
+        with db.engine.begin() as conn:
+            sailor_id = conn.execute(
+                text('''
+                    INSERT INTO "RACINGAPP"."SAILORCONTROL"
+                    (key, fullname, firstname, lastname, club)
+                    VALUES (nextval('key'), :fullname, :firstname, :lastname, :club)
+                    RETURNING key
+                '''),
+                {
+                    "fullname": full_name,
+                    "firstname": first_name,
+                    "lastname": last_name or None,
+                    "club": club_id
+                }
+            ).scalar()
+
+        return jsonify({"ok": True, "member_id": sailor_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.put("/api/members/<int:member_id>")
+def api_update_member(member_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    first_name = (payload.get("first_name") or "").strip()
+    last_name = (payload.get("last_name") or "").strip()
+    if not first_name:
+        return jsonify({"ok": False, "error": "first_name is required"}), 400
+
+    full_name = f"{first_name} {last_name}".strip()
+
+    try:
+        with db.engine.begin() as conn:
+            updated = conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."SAILORCONTROL"
+                    SET fullname = :fullname,
+                        firstname = :firstname,
+                        lastname = :lastname
+                    WHERE key = :member_id
+                      AND club = :club_id
+                '''),
+                {
+                    "fullname": full_name,
+                    "firstname": first_name,
+                    "lastname": last_name or None,
+                    "member_id": member_id,
+                    "club_id": club_id
+                }
+            )
+
+        if updated.rowcount == 0:
+            return jsonify({"ok": False, "error": "Member not found"}), 404
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/boats/catalog")
+def api_boat_catalog():
+    if not session.get("club_id"):
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            rows = conn.execute(
+                text('''
+                    SELECT DISTINCT ON (hc.boat)
+                           hc.key,
+                           hc.boat,
+                           hc.handicap
+                    FROM "RACINGAPP"."HANDICAPCONTROL" hc
+                    ORDER BY hc.boat, hc.date DESC, hc.key DESC
+                ''')
+            ).mappings().all()
+
+        boats = [{"key": r["key"], "boat": r["boat"], "handicap": r["handicap"]} for r in rows]
+        return jsonify({"ok": True, "boats": boats})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/members/<int:member_id>/boats")
+def api_assign_boat(member_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    handicap_key = payload.get("handicap_key")
+    sail_number = (payload.get("sail_number") or "").strip()
+    if not handicap_key or not sail_number:
+        return jsonify({"ok": False, "error": "handicap_key and sail_number are required"}), 400
+
+    try:
+        with db.engine.begin() as conn:
+            sailor_exists = conn.execute(
+                text('SELECT 1 FROM "RACINGAPP"."SAILORCONTROL" WHERE key = :member_id AND club = :club_id'),
+                {"member_id": member_id, "club_id": club_id}
+            ).scalar()
+
+            if not sailor_exists:
+                return jsonify({"ok": False, "error": "Member not found"}), 404
+
+            boat_key = conn.execute(
+                text('''
+                    INSERT INTO "RACINGAPP"."BOATCONTROL" (key, boat, sailor, sail_number)
+                    VALUES (nextval('key'), :boat, :sailor, :sail_number)
+                    RETURNING key
+                '''),
+                {"boat": handicap_key, "sailor": member_id, "sail_number": sail_number}
+            ).scalar()
+
+        return jsonify({"ok": True, "boat_key": boat_key})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/series")
+def series_page():
+    if not session.get("club_id"):
+        return redirect("/login")
+    return render_template("series.html", clubName=session.get("club_name"))
+
+
+@app.get("/api/series/manage")
+def api_series_manage_list():
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            rows = conn.execute(
+                text('''
+                    SELECT key, year, name
+                    FROM "RACINGAPP"."SERIESCONTROL"
+                    WHERE club = :club_id
+                    ORDER BY year DESC NULLS LAST, name ASC
+                '''),
+                {"club_id": club_id}
+            ).mappings().all()
+
+        return jsonify({"ok": True, "series": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/series/manage")
+def api_series_manage_create():
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    year = (payload.get("year") or "").strip()
+    name = (payload.get("name") or "").strip()
+
+    if not name:
+        return jsonify({"ok": False, "error": "Series name is required"}), 400
+    if not year:
+        return jsonify({"ok": False, "error": "Series year is required"}), 400
+
+    try:
+        with db.engine.begin() as conn:
+            exists = conn.execute(
+                text('''
+                    SELECT 1
+                    FROM "RACINGAPP"."SERIESCONTROL"
+                    WHERE club = :club_id
+                      AND LOWER(name) = LOWER(:name)
+                      AND year = :year
+                '''),
+                {"club_id": club_id, "name": name, "year": year}
+            ).scalar()
+
+            if exists:
+                return jsonify({"ok": False, "error": "Series already exists for this club/year"}), 409
+
+            series_id = conn.execute(
+                text('''
+                    INSERT INTO "RACINGAPP"."SERIESCONTROL" (key, year, name, club)
+                    VALUES (nextval('key'), :year, :name, :club)
+                    RETURNING key
+                '''),
+                {"year": year, "name": name, "club": club_id}
+            ).scalar()
+
+        return jsonify({"ok": True, "series_id": series_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.put("/api/series/manage/<int:series_id>")
+def api_series_manage_update(series_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    year = (payload.get("year") or "").strip()
+    name = (payload.get("name") or "").strip()
+
+    if not name:
+        return jsonify({"ok": False, "error": "Series name is required"}), 400
+    if not year:
+        return jsonify({"ok": False, "error": "Series year is required"}), 400
+
+    try:
+        with db.engine.begin() as conn:
+            updated = conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."SERIESCONTROL"
+                    SET year = :year,
+                        name = :name
+                    WHERE key = :series_id
+                      AND club = :club_id
+                '''),
+                {"year": year, "name": name, "series_id": series_id, "club_id": club_id}
+            )
+
+        if updated.rowcount == 0:
+            return jsonify({"ok": False, "error": "Series not found"}), 404
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/club_entry")
+def club_entry():
+    # Entry setup is now behind login; club comes from session
+    club_id = session.get("club_id")
+    if not club_id:
+        return redirect("/login")
+
+    # Clear pending race setup when starting a new entry flow
+    session.pop("race", None)
+    race_data = session.get("race", {})
+    race_data["club_id"] = str(club_id)
+    session["race"] = race_data
+    return render_template("club_entry.html", clubId=str(club_id), clubName=session.get("club_name"))
 
 @app.route("/sailor_entry")
 def sailor_entry():
-    clubId = request.args.get('clubName')
+    clubId = request.args.get('clubName') or session.get("club_id")
     seriesId = request.args.get('seriesName')
+    if not clubId:
+        return redirect("/login")
     session['club_id'] = clubId
     session['series_id'] = seriesId  # Store series_id in session
     race_data = session.get("race", {})
@@ -136,7 +533,7 @@ def api_entries():
 @app.post("/api/set_club_series")
 def api_set_club_series():
     payload = request.get_json(silent=True) or {}
-    club_id = payload.get("club_id")
+    club_id = payload.get("club_id") or session.get("club_id")
     series_id = payload.get("series_id")
     if not club_id or not series_id:
         return jsonify({"ok": False, "error": "Missing club_id or series_id"}), 400
@@ -178,6 +575,8 @@ def entry_sailor():
 @app.get("/entry_summary")
 def entry_summary_page():
     """Render the entry summary page"""
+    if not session.get("club_id"):
+        return redirect("/login")
     return render_template("entry_summary.html")
 
 @app.route("/test_race")
@@ -233,6 +632,8 @@ def test_race():
 @app.get("/race_control")
 def race_control_page():
     """Render the race control page"""
+    if not session.get("club_id"):
+        return redirect("/login")
     return render_template("race_control.html")
 
 

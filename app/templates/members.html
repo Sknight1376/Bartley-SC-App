@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="static/js/jquery-3.6.3.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+  <style>
+    .members-grid { width: 990px; margin: 20px auto; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 16px; }
+    .card h3 { margin: 0 0 12px; color: #1331C5; }
+    .field { margin-bottom: 10px; }
+    .field label { display:block; color:#444; margin-bottom:4px; font-size:13px; }
+    .field input, .field select { width:100%; height:36px; border:1px solid #d0d0d0; border-radius:6px; padding:0 10px; }
+    .members-table { width: 990px; margin: 10px auto 0; border-collapse: collapse; background:#fff; }
+    .members-table th { background:#e0e0e0; padding:8px 10px; border-bottom: 2px solid #d0d0d0; text-align:left; }
+    .members-table td { padding:8px 10px; border-bottom: 1px solid #ececec; vertical-align: top; }
+    .boats-list { margin:0; padding-left: 18px; }
+    .small-btn { background:#1331C5; color:#fff; border:0; border-radius:6px; height:32px; padding:0 10px; cursor:pointer; }
+    .small-btn.secondary { background:#6b7280; }
+  </style>
+</head>
+<body>
+
+<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
+<section class="banner"></section>
+<br>
+
+<div class="form-border" style="text-align:center;">
+  <h4 style="color:#979797">Club Administration</h4>
+  <h2>Members & Boats</h2>
+  <h4 style="color:#979797">{{ clubName }}</h4>
+</div>
+
+<div class="members-grid">
+  <div class="card">
+    <h3>Add Member</h3>
+    <div class="field">
+      <label for="firstName">First Name</label>
+      <input id="firstName" type="text" placeholder="e.g. Emma">
+    </div>
+    <div class="field">
+      <label for="lastName">Last Name</label>
+      <input id="lastName" type="text" placeholder="e.g. Davis">
+    </div>
+    <button id="addMemberBtn" class="small-btn">Add Member</button>
+  </div>
+
+  <div class="card">
+    <h3>Assign New Boat</h3>
+    <div class="field">
+      <label for="memberSelect">Member</label>
+      <select id="memberSelect"></select>
+    </div>
+    <div class="field">
+      <label for="boatSelect">Boat Class</label>
+      <select id="boatSelect"></select>
+    </div>
+    <div class="field">
+      <label for="sailNumber">Sail Number</label>
+      <input id="sailNumber" type="text" placeholder="e.g. 3456">
+    </div>
+    <button id="assignBoatBtn" class="small-btn">Assign Boat</button>
+  </div>
+</div>
+
+<section style="width:990px; margin:16px auto 0;">
+  <table class="members-table">
+    <thead>
+      <tr>
+        <th style="width:26%;">Member</th>
+        <th style="width:46%;">Assigned Boats</th>
+        <th style="width:28%;">Edit Member</th>
+      </tr>
+    </thead>
+    <tbody id="membersBody"></tbody>
+  </table>
+</section>
+
+<div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
+  <button class="blue-button" onclick="window.location.href='/landing'">Back to Landing</button>
+</div>
+
+<script>
+let members = [];
+let boatCatalog = [];
+
+function escapeHtml(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function memberName(m) {
+  const full = (m.full_name || '').trim();
+  if (full) return full;
+  return `${m.first_name || ''} ${m.last_name || ''}`.trim();
+}
+
+function refreshMemberSelect() {
+  const select = document.getElementById('memberSelect');
+  select.innerHTML = '<option value="">Select member…</option>';
+  members.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = memberName(m);
+    select.appendChild(opt);
+  });
+}
+
+function refreshBoatSelect() {
+  const select = document.getElementById('boatSelect');
+  select.innerHTML = '<option value="">Select boat class…</option>';
+  boatCatalog.forEach(b => {
+    const opt = document.createElement('option');
+    opt.value = b.key;
+    opt.textContent = `${b.boat} (HC ${b.handicap})`;
+    select.appendChild(opt);
+  });
+}
+
+function renderMembers() {
+  const tbody = document.getElementById('membersBody');
+  tbody.innerHTML = '';
+
+  members.forEach(m => {
+    const tr = document.createElement('tr');
+    const boatsHtml = (m.boats && m.boats.length)
+      ? `<ul class="boats-list">${m.boats.map(b => `<li>${escapeHtml(b.boat)} — Sail ${escapeHtml(b.sail_number)} (HC ${escapeHtml(b.handicap)})</li>`).join('')}</ul>`
+      : '<span style="color:#999;">No boats assigned</span>';
+
+    tr.innerHTML = `
+      <td><strong>${escapeHtml(memberName(m))}</strong></td>
+      <td>${boatsHtml}</td>
+      <td>
+        <input id="edit-first-${m.id}" type="text" value="${escapeHtml(m.first_name || '')}" style="width:120px; height:30px; border:1px solid #d0d0d0; border-radius:6px; padding:0 8px; margin-right:6px;">
+        <input id="edit-last-${m.id}" type="text" value="${escapeHtml(m.last_name || '')}" style="width:120px; height:30px; border:1px solid #d0d0d0; border-radius:6px; padding:0 8px; margin-right:6px;">
+        <button class="small-btn secondary" onclick="saveMember(${m.id})">Save</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadMembers() {
+  const res = await fetch('/api/members', { cache: 'no-store' });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to load members');
+  }
+  members = data.members || [];
+  refreshMemberSelect();
+  renderMembers();
+}
+
+async function loadBoatCatalog() {
+  const res = await fetch('/api/boats/catalog', { cache: 'no-store' });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to load boats');
+  }
+  boatCatalog = data.boats || [];
+  refreshBoatSelect();
+}
+
+async function saveMember(memberId) {
+  const firstName = document.getElementById(`edit-first-${memberId}`).value.trim();
+  const lastName = document.getElementById(`edit-last-${memberId}`).value.trim();
+
+  if (!firstName) {
+    alert('First name is required.');
+    return;
+  }
+
+  const res = await fetch(`/api/members/${memberId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: firstName, last_name: lastName })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to update member');
+    return;
+  }
+
+  await loadMembers();
+}
+
+async function addMember() {
+  const firstName = document.getElementById('firstName').value.trim();
+  const lastName = document.getElementById('lastName').value.trim();
+  if (!firstName) {
+    alert('First name is required.');
+    return;
+  }
+
+  const res = await fetch('/api/members', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ first_name: firstName, last_name: lastName })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to create member');
+    return;
+  }
+
+  document.getElementById('firstName').value = '';
+  document.getElementById('lastName').value = '';
+  await loadMembers();
+}
+
+async function assignBoat() {
+  const memberId = document.getElementById('memberSelect').value;
+  const handicapKey = document.getElementById('boatSelect').value;
+  const sailNumber = document.getElementById('sailNumber').value.trim();
+
+  if (!memberId || !handicapKey || !sailNumber) {
+    alert('Select member, boat class, and sail number.');
+    return;
+  }
+
+  const res = await fetch(`/api/members/${memberId}/boats`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ handicap_key: handicapKey, sail_number: sailNumber })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to assign boat');
+    return;
+  }
+
+  document.getElementById('sailNumber').value = '';
+  await loadMembers();
+}
+
+document.getElementById('addMemberBtn').addEventListener('click', addMember);
+document.getElementById('assignBoatBtn').addEventListener('click', assignBoat);
+
+(async function init() {
+  try {
+    await Promise.all([loadBoatCatalog(), loadMembers()]);
+  } catch (e) {
+    alert(e.message || 'Failed to load member admin page');
+  }
+})();
+</script>
+</body>
+</html>

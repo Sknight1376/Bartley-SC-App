@@ -19,6 +19,13 @@ Stream results
 Series list
 
 
+test_admin / ChangeMe123! (minimal dataset)
+bartley_admin / ChangeMe123!
+rsyc_admin / ChangeMe123!
+hamble_admin / ChangeMe123!
+warsash_admin / ChangeMe123!
+hillhead_admin / ChangeMe123!
+
 ## 🚀 Frontend improvements (UI/UX)
 
 1. Session fallback
@@ -89,11 +96,11 @@ Series list
    - Enforce payload schema with `marshmallow` or `pydantic`.
    - Protect with race state (no lap after finish or before start).
 
-4. DB design
+<!-- 4. DB design
    - `race` / `race_entry` / `lap` tables:
      - `race_entry` link for each boat in race.
      - `lap` row per `race_entry` + `lap_number`.
-   - store `elapsed_sec` numeric and `corrected_sec` numeric not just text.
+   - store `elapsed_sec` numeric and `corrected_sec` numeric not just text. -->
 
 5. API
    - CRUD for entries and races.

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="static/js/jquery-3.6.3.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+</head>
+<body>
+
+<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
+<section class="banner"></section>
+<br>
+
+<div class="form-border" style="text-align:center;">
+  <h4 style="color: #979797">Welcome to</h4>
+  <h2>QuickSail Race Control</h2>
+  <h4 style="color: #979797; max-width: 720px; margin: 0 auto; line-height: 1.5;">
+    QuickSail helps sailing clubs run races end-to-end: manage entries,
+    time laps and finishes, store race results, and review final standings.
+  </h4>
+  <br>
+  <h4 style="color: #979797; max-width: 720px; margin: 0 auto; line-height: 1.5;">
+    Sign in with your club account to start a new race session.
+  </h4>
+</div>
+
+<div class="form-footer" style="display:flex; gap:20px; justify-content:center;">
+  <button id="goLoginBtn" class="blue-button">Go to Login</button>
+</div>
+
+<script>
+document.getElementById('goLoginBtn').addEventListener('click', () => {
+  window.location.href = '/login';
+});
+</script>
+</body>
+</html>
