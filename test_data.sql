@@ -79,19 +79,29 @@ INSERT INTO "RACINGAPP"."BOATCONTROL" (boat, sailor, sail_number) VALUES
 ((SELECT key FROM "RACINGAPP"."HANDICAPCONTROL" WHERE boat = 'BRITISH_MOTH'), (SELECT key FROM "RACINGAPP"."SAILORCONTROL" WHERE FullName = 'Steve Hall'), '1112');
 
 -- ===========================================
--- 5. SAMPLE RACE RESULTS (Optional - for testing race control)
+-- 5. PERSISTED RACE / ENTRY / LAP TEST DATA
 -- ===========================================
--- Insert some sample race results for the Bartley Summer Series
-INSERT INTO "RACINGAPP"."RACEMASTER" (boatkey, club, series, race, recorded_time, corrected_time, time) VALUES
--- Race 1 results
-((SELECT bc.key FROM "RACINGAPP"."BOATCONTROL" bc JOIN "RACINGAPP"."SAILORCONTROL" sc ON bc.sailor = sc.key WHERE sc.FullName = 'John Smith'), (SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = 'Bartley Sailing Club'), (SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = 'Summer Series'), 1, '00:45:30', '00:42:15', '00:45:30'),
-((SELECT bc.key FROM "RACINGAPP"."BOATCONTROL" bc JOIN "RACINGAPP"."SAILORCONTROL" sc ON bc.sailor = sc.key WHERE sc.FullName = 'Sarah Johnson'), (SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = 'Bartley Sailing Club'), (SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = 'Summer Series'), 1, '00:47:15', '00:43:45', '00:47:15'),
-((SELECT bc.key FROM "RACINGAPP"."BOATCONTROL" bc JOIN "RACINGAPP"."SAILORCONTROL" sc ON bc.sailor = sc.key WHERE sc.FullName = 'Mike Wilson'), (SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = 'Bartley Sailing Club'), (SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = 'Summer Series'), 1, '00:44:20', '00:41:30', '00:44:20'),
+INSERT INTO "RACINGAPP"."RACE" (club, series, race_no, status, started_at, ended_at) VALUES
+((SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = 'Bartley Sailing Club'), (SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = 'Summer Series'), 3, 'finished', CURRENT_TIMESTAMP - INTERVAL '2 hour', CURRENT_TIMESTAMP - INTERVAL '75 minute');
 
--- Race 2 results
-((SELECT bc.key FROM "RACINGAPP"."BOATCONTROL" bc JOIN "RACINGAPP"."SAILORCONTROL" sc ON bc.sailor = sc.key WHERE sc.FullName = 'John Smith'), (SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = 'Bartley Sailing Club'), (SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = 'Summer Series'), 2, '00:46:45', '00:43:25', '00:46:45'),
-((SELECT bc.key FROM "RACINGAPP"."BOATCONTROL" bc JOIN "RACINGAPP"."SAILORCONTROL" sc ON bc.sailor = sc.key WHERE sc.FullName = 'Emma Davis'), (SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = 'Bartley Sailing Club'), (SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = 'Summer Series'), 2, '00:49:10', '00:45:30', '00:49:10'),
-((SELECT bc.key FROM "RACINGAPP"."BOATCONTROL" bc JOIN "RACINGAPP"."SAILORCONTROL" sc ON bc.sailor = sc.key WHERE sc.FullName = 'David Brown'), (SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = 'Bartley Sailing Club'), (SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = 'Summer Series'), 2, '00:48:05', '00:44:40', '00:48:05');
+INSERT INTO "RACINGAPP"."RACE_ENTRY" (race_id, boatkey, sailor, boat, sail_number, handicap) VALUES
+((SELECT key FROM "RACINGAPP"."RACE" WHERE race_no = 3 AND series = (SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = 'Summer Series') ORDER BY key DESC LIMIT 1),
+ (SELECT bc.key FROM "RACINGAPP"."BOATCONTROL" bc JOIN "RACINGAPP"."SAILORCONTROL" sc ON bc.sailor = sc.key WHERE sc.FullName = 'John Smith'),
+ 'John Smith', 'LASER', '1234', (SELECT hc.handicap FROM "RACINGAPP"."HANDICAPCONTROL" hc WHERE hc.boat = 'LASER' LIMIT 1)),
+((SELECT key FROM "RACINGAPP"."RACE" WHERE race_no = 3 AND series = (SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = 'Summer Series') ORDER BY key DESC LIMIT 1),
+ (SELECT bc.key FROM "RACINGAPP"."BOATCONTROL" bc JOIN "RACINGAPP"."SAILORCONTROL" sc ON bc.sailor = sc.key WHERE sc.FullName = 'Sarah Johnson'),
+ 'Sarah Johnson', '420', '5678', (SELECT hc.handicap FROM "RACINGAPP"."HANDICAPCONTROL" hc WHERE hc.boat = '420' LIMIT 1)),
+((SELECT key FROM "RACINGAPP"."RACE" WHERE race_no = 3 AND series = (SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = 'Summer Series') ORDER BY key DESC LIMIT 1),
+ (SELECT bc.key FROM "RACINGAPP"."BOATCONTROL" bc JOIN "RACINGAPP"."SAILORCONTROL" sc ON bc.sailor = sc.key WHERE sc.FullName = 'Mike Wilson'),
+ 'Mike Wilson', 'FIREBALL', '9012', (SELECT hc.handicap FROM "RACINGAPP"."HANDICAPCONTROL" hc WHERE hc.boat = 'FIREBALL' LIMIT 1));
+
+INSERT INTO "RACINGAPP"."LAP" (race_entry_id, lap_number, is_finish, elapsed_sec, corrected_sec, position) VALUES
+((SELECT re.key FROM "RACINGAPP"."RACE_ENTRY" re WHERE re.sailor = 'John Smith' ORDER BY re.key DESC LIMIT 1), 1, FALSE, 900, 818, 1),
+((SELECT re.key FROM "RACINGAPP"."RACE_ENTRY" re WHERE re.sailor = 'Sarah Johnson' ORDER BY re.key DESC LIMIT 1), 1, FALSE, 945, 844, 2),
+((SELECT re.key FROM "RACINGAPP"."RACE_ENTRY" re WHERE re.sailor = 'Mike Wilson' ORDER BY re.key DESC LIMIT 1), 1, FALSE, 960, 853, 3),
+((SELECT re.key FROM "RACINGAPP"."RACE_ENTRY" re WHERE re.sailor = 'John Smith' ORDER BY re.key DESC LIMIT 1), 2, TRUE, 1830, 1691, 1),
+((SELECT re.key FROM "RACINGAPP"."RACE_ENTRY" re WHERE re.sailor = 'Sarah Johnson' ORDER BY re.key DESC LIMIT 1), 2, TRUE, 1895, 1692, 2),
+((SELECT re.key FROM "RACINGAPP"."RACE_ENTRY" re WHERE re.sailor = 'Mike Wilson' ORDER BY re.key DESC LIMIT 1), 2, TRUE, 1920, 1707, 3);
 
 -- ===========================================
 -- VERIFICATION QUERIES
@@ -112,8 +122,11 @@ UNION ALL
 -- Check handicap data
 SELECT 'Handicaps:', COUNT(*) FROM "RACINGAPP"."HANDICAPCONTROL"
 UNION ALL
--- Check race results
-SELECT 'Race Results:', COUNT(*) FROM "RACINGAPP"."RACEMASTER";
+SELECT 'Persisted Races:', COUNT(*) FROM "RACINGAPP"."RACE"
+UNION ALL
+SELECT 'Persisted Entries:', COUNT(*) FROM "RACINGAPP"."RACE_ENTRY"
+UNION ALL
+SELECT 'Persisted Laps:', COUNT(*) FROM "RACINGAPP"."LAP";
 
 -- Sample query to see boat details with handicaps
 SELECT

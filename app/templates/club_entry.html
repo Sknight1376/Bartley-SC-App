@@ -87,15 +87,40 @@ document.addEventListener("DOMContentLoaded", () => {
     ]);
 
     // On click: go to next page
-    document.querySelector("#nextButton").addEventListener("click", () => {
-        const params = new URLSearchParams();
+    document.querySelector("#nextButton").addEventListener("click", async () => {
+        const clubSelect = document.querySelector("#clubName");
+        const seriesSelect = document.querySelector("#seriesName");
+        const selectedClubId = clubSelect.value;
+        const selectedSeriesId = seriesSelect.value;
 
-        ["#clubName", "#seriesName"].forEach(sel => {
-            const el = document.querySelector(sel);
-            if (el && el.value) {
-                params.append(el.id.replace("Select", ""), el.value);
+        if (!selectedClubId || !selectedSeriesId) {
+            alert('Please select club and series');
+            return;
+        }
+
+        // Set sessionStorage
+        sessionStorage.setItem('club', selectedClubId);
+        sessionStorage.setItem('series', selectedSeriesId);
+
+        // Set server session
+        try {
+            const res = await fetch('/api/set_club_series', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ club_id: selectedClubId, series_id: selectedSeriesId })
+            });
+            if (!res.ok) {
+                alert('Failed to set session');
+                return;
             }
-        });
+        } catch (e) {
+            alert('Error setting session');
+            return;
+        }
+
+        const params = new URLSearchParams();
+        params.append("clubName", selectedClubId);
+        params.append("seriesName", selectedSeriesId);
 
         window.location.href = `/sailor_entry?${params.toString()}`;
     });

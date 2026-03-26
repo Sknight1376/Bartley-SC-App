@@ -109,10 +109,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Load existing entries from session on page load
   async function loadExistingEntries() {
     try {
-      const res = await fetch(`/api/session/entries`, { cache: 'no-store' });
+      const res = await fetch(`/api/session/attributes`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        const existingEntries = data.entries || [];
+        const attributes = data.attributes;
+        const existingEntries = attributes.entries || [];
         for (const entry of existingEntries) {
           appendRow({
             sailor: entry.sailor,

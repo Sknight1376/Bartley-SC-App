@@ -124,10 +124,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 // Helper function to retrieve entries from session
 async function getEntriesFromSession() {
   try {
-    const res = await fetch(`/api/session/entries`, { cache: 'no-store' });
+    const res = await fetch(`/api/session/attributes`, { cache: 'no-store' });
     if (!res.ok) return null;
     const data = await res.json();
-    return data.entries || null;
+    return data.attributes.entries || null;
   } catch (e) {
     console.error('Error retrieving entries:', e);
     return null;

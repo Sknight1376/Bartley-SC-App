@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="static/js/jquery-3.6.3.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+  <style>
+    .meta-grid {
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      flex-wrap: wrap;
+      margin: 24px 0 8px;
+    }
+    .meta-item {
+      text-align: center;
+      min-width: 100px;
+    }
+    .meta-label {
+      font-size: 11px;
+      color: #979797;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+    }
+    .meta-value {
+      font-size: 22px;
+      font-weight: bold;
+      color: #1331C5;
+      margin-top: 4px;
+    }
+    #results-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+    }
+    #results-table th {
+      background: #e0e0e0;
+      padding: 10px 12px;
+      border-bottom: 3px solid #c8c8c8;
+    }
+    #results-table td {
+      padding: 10px 12px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+    .pos-badge {
+      font-size: 150%;
+      font-weight: bold;
+      color: #1331C5;
+    }
+    .dnf-badge {
+      color: #c0392b;
+      font-weight: bold;
+      font-size: 13px;
+      letter-spacing: 0.5px;
+    }
+    #loading-msg {
+      text-align: center;
+      color: #979797;
+      padding: 30px 0;
+    }
+  </style>
+</head>
+<body>
+
+<div class="lettering">QuickSail</div>
+
+<section class="banner"></section>
+
+<br>
+
+<div class="form-border">
+  <h2 style="text-align:center; color:#1331C5; margin-bottom:4px;">Race Summary</h2>
+  <div class="meta-grid" id="race-meta"></div>
+</div>
+
+<!-- Results Table -->
+<section id="summary-section" style="width:990px; margin:30px auto 0;">
+  <p id="loading-msg">Loading results…</p>
+  <table id="results-table" style="display:none;">
+    <thead>
+      <tr>
+        <th style="text-align:center;">Position</th>
+        <th style="text-align:left;">Sailor</th>
+        <th style="text-align:left;">Boat</th>
+        <th style="text-align:center;">Sail #</th>
+        <th style="text-align:center;">Handicap</th>
+        <th style="text-align:center;">Laps</th>
+        <th style="text-align:center;">Elapsed Time</th>
+        <th style="text-align:center;">Corrected Time</th>
+      </tr>
+    </thead>
+    <tbody id="results-tbody"></tbody>
+  </table>
+</section>
+
+<div class="form-footer">
+  <button class="blue-button" onclick="window.location.href='/'">Return to Home</button>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", async () => {
+  const params = new URLSearchParams(window.location.search);
+  const raceId = params.get('race_id');
+  const loadingMsg = document.getElementById('loading-msg');
+
+  if (!raceId) {
+    loadingMsg.textContent = 'No race ID provided. Please return to the home page.';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/races/${raceId}/summary`);
+    const data = await res.json();
+
+    if (!data.ok) {
+      loadingMsg.textContent = 'Could not load race summary: ' + (data.error || 'unknown error');
+      return;
+    }
+
+    const race = data.race;
+    const results = data.results;
+
+    // Populate race meta strip
+    const metaItems = [
+      { label: 'Race',       value: `#${race.race_no}` },
+      { label: 'Series',     value: race.series_name },
+      { label: 'Club',       value: race.club_name },
+      { label: 'Date',       value: race.date      || '—' },
+      { label: 'Start Time', value: race.started_at || '—' },
+      { label: 'Duration',   value: race.duration  || '—' },
+      { label: 'Entries',    value: results.length },
+    ];
+    document.getElementById('race-meta').innerHTML = metaItems.map(item => `
+      <div class="meta-item">
+        <div class="meta-label">${item.label}</div>
+        <div class="meta-value">${item.value}</div>
+      </div>
+    `).join('');
+
+    // Populate results table
+    const tbody = document.getElementById('results-tbody');
+    results.forEach(r => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td style="text-align:center;">
+          ${r.dnf
+            ? '<span class="dnf-badge">DNF</span>'
+            : `<span class="pos-badge">${r.position}</span>`}
+        </td>
+        <td>${r.sailor}</td>
+        <td>${r.boat}</td>
+        <td style="text-align:center;">${r.sail_number}</td>
+        <td style="text-align:center;">${r.handicap ?? '—'}</td>
+        <td style="text-align:center;">${r.lap_count}</td>
+        <td style="text-align:center; font-weight:bold;">${r.elapsed_time ?? '—'}</td>
+        <td style="text-align:center; font-weight:bold; color:#1331C5;">${r.corrected_time ?? '—'}</td>
+      `;
+      tbody.appendChild(row);
+    });
+
+    loadingMsg.style.display = 'none';
+    document.getElementById('results-table').style.display = 'table';
+
+  } catch (e) {
+    console.error('Error loading summary:', e);
+    loadingMsg.textContent = 'Error loading race summary.';
+  }
+});
+</script>
+
+<script type="text/javascript" src="{{ url_for('static', filename='js/main.js')}}"></script>
+
+</body>
+</html>

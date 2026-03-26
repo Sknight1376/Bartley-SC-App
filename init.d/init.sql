@@ -1,21 +1,6 @@
 CREATE SCHEMA "RACINGAPP";
-CREATE SCHEMA "AUDIT";
 CREATE SEQUENCE key START 1;
 
-
--- CREATE TABLE "RACINGAPP"."RACES"
--- (
--- 	key				bigint NOT NULL,
--- 	boat			varchar(255) NOT NULL,
--- 	sail_number		varchar(255) NOT NULL,
--- 	handicap 		int NULL,
--- 	club			bitint) NULL,
--- 	series			varchar(255) NULL,
--- 	race 			int NULL,
--- 	recorded_time 	timestamp NULL,
--- 	corrected_time 	timestamp NULL,
--- 	final_position 	int NULL
--- );
 
 CREATE TABLE "RACINGAPP"."SERIESCONTROL"
 (
@@ -56,25 +41,40 @@ CREATE TABLE "RACINGAPP"."BOATCONTROL"
 	sail_number		varchar(255) NOT NULL
 );
 
-CREATE TABLE "RACINGAPP"."RACEMASTER"
+CREATE TABLE "RACINGAPP"."RACE"
 (
 	key				bigint NOT NULL PRIMARY KEY,
-	boatkey			bigint,
-	club			bigint,
-	series			bigint,
-	race 			int NULL,
-	recorded_time 	time NULL,
-	corrected_time 	time NULL,
-	time			time
+	club			bigint NOT NULL,
+	series			bigint NOT NULL,
+	race_no			int NOT NULL,
+	status			varchar(50) NOT NULL DEFAULT 'not_started',
+	started_at		timestamp NULL,
+	ended_at		timestamp NULL
 );
 
-CREATE TABLE "AUDIT".cdc
+CREATE TABLE "RACINGAPP"."RACE_ENTRY"
 (
-	TableName varchar(255) NULL,
-	DateColumn varchar(255) NULL,
-	LastLoadTimestamp date NULL
+	key				bigint NOT NULL PRIMARY KEY,
+	race_id			bigint NOT NULL REFERENCES "RACINGAPP"."RACE"(key),
+	boatkey			bigint NOT NULL,
+	sailor			varchar(255) NOT NULL,
+	boat			varchar(255) NOT NULL,
+	sail_number		varchar(255) NOT NULL,
+	handicap		int NULL
 );
 
+CREATE TABLE "RACINGAPP"."LAP"
+(
+	key				bigint NOT NULL PRIMARY KEY,
+	race_entry_id		bigint NOT NULL REFERENCES "RACINGAPP"."RACE_ENTRY"(key),
+	lap_number		int NOT NULL,
+	is_finish		boolean NOT NULL DEFAULT FALSE,
+	elapsed_sec		int NOT NULL,
+	corrected_sec		int NULL,
+	position		int NULL,
+	recorded_at		timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	CONSTRAINT lap_unique_entry_number_finish UNIQUE (race_entry_id, lap_number, is_finish)
+);
 
 CREATE TEMPORARY TABLE temp_dest (boat varchar(255), handicap int);
 
@@ -84,8 +84,14 @@ INSERT INTO "RACINGAPP"."HANDICAPCONTROL"
 SELECT nextval('key'), current_timestamp, boat, handicap
 FROM temp_dest;
 
-ALTER TABLE "RACINGAPP"."RACEMASTER"
-  ALTER COLUMN key SET DEFAULT nextval('key');
+ALTER TABLE "RACINGAPP"."RACE"
+	ALTER COLUMN key SET DEFAULT nextval('key');
+
+ALTER TABLE "RACINGAPP"."RACE_ENTRY"
+	ALTER COLUMN key SET DEFAULT nextval('key');
+
+ALTER TABLE "RACINGAPP"."LAP"
+	ALTER COLUMN key SET DEFAULT nextval('key');
 
 
 ALTER TABLE "RACINGAPP"."CLUBCONTROL"

@@ -77,18 +77,27 @@ document.addEventListener("DOMContentLoaded", async () => {
   let raceActive = false;
   let lapColumns = new Map(); // Map<name, {data: {entryIndex: {elapsedTime, correctedTime}}}>
   let lapOrder = []; // Array of names in order added
+  let clubId = null;
+  let seriesId = null;
+  let raceId = null;
+  let raceNo = null;
 
   // Load entries from session
   async function loadEntries() {
     try {
-      const res = await fetch(`/api/session/entries`, { cache: 'no-store' });
+      const res = await fetch(`/api/session/attributes`, { cache: 'no-store' });
       if (!res.ok) {
         alert('No entries found. Please go back to entry summary.');
         window.location.href = `/entry_summary`;
         return;
       }
       const data = await res.json();
-      entries = data.entries || [];
+      const attributes = data.attributes;
+      entries = attributes.entries || [];
+      clubId = attributes.club_id;
+      seriesId = attributes.series_id;
+      raceId = attributes.race_id;
+      raceNo = attributes.race_no;
 
       // Sort by handicap ascending
       entries.sort((a, b) => {
@@ -152,36 +161,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     return formatTime(correctedSeconds);
   }
 
-  // Log time to racemaster
-  async function logTime(boatkey, elapsedTime, correctedTime, isFinish) {
+  function getEntryKey(entry, fallbackIndex) {
+    return String(entry.entry_id || entry.key || fallbackIndex);
+  }
+
+  async function logTime(entry, elapsedTime, correctedTime, lapNumber, isFinish, position = null) {
     try {
-      const seriesRes = await fetch(`${baseUrl}/api/session/series`);
-      if (!seriesRes.ok) {
-        alert('No series found. Please go back to club entry.');
+      if (!raceId || !entry.entry_id) {
+        alert('Race has not been started correctly. Please restart the race setup.');
         return;
       }
-      const seriesData = await seriesRes.json();
-      const seriesId = seriesData.series_id;
-
-      const raceRes = await fetch(`${baseUrl}/api/next_race/${seriesId}`);
-      if (!raceRes.ok) throw new Error('Failed to get race number');
-      const raceData = await raceRes.json();
-      const raceNo = raceData.next_race;
-
-      const clubRes = await fetch(`${baseUrl}/api/session/club`);
-      const clubData = await clubRes.json();
-      const clubId = clubData.club_id;
 
       const payload = {
-        boatkey: boatkey,
+        entry_id: entry.entry_id,
+        lap_number: lapNumber,
         elapsed_time: elapsedTime,
         corrected_time: correctedTime,
-        club_id: clubId,
-        series_id: seriesId,
-        race_no: raceNo,
-        is_finish: isFinish
+        is_finish: isFinish,
+        position: position
       };
-      const logRes = await fetch(`${baseUrl}/api/log_race_time`, {
+      const logRes = await fetch(`${baseUrl}/api/races/${raceId}/lap`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -247,11 +246,15 @@ document.addEventListener("DOMContentLoaded", async () => {
         td.style.padding = '8px 10px';
         td.style.textAlign = 'center';
         const lap = lapColumns.get(name);
-        const lapData = lap.data[index];
+        const entryKey = getEntryKey(entry, index);
+        const lapData = lap.data[entryKey];
         if (lapData) {
           // Calculate position for this lap: rank among entries that have this lap
-          const entriesWithLap = entries.map((entry, idx) => ({ idx, data: lap.data[idx] })).filter(e => e.data).sort((a, b) => a.data.correctedTime.localeCompare(b.data.correctedTime));
-          const position = entriesWithLap.findIndex(e => e.idx === index) + 1;
+          const entriesWithLap = entries
+            .map((currentEntry, idx) => ({ key: getEntryKey(currentEntry, idx), data: lap.data[getEntryKey(currentEntry, idx)] }))
+            .filter(e => e.data)
+            .sort((a, b) => a.data.correctedTime.localeCompare(b.data.correctedTime));
+          const position = entriesWithLap.findIndex(e => e.key === entryKey) + 1;
           td.innerHTML = `
             <div style=" display: flex; align-items: center; justify-content: center; width: 100%; ">
               <div>
@@ -311,17 +314,26 @@ document.addEventListener("DOMContentLoaded", async () => {
       timestamp: now
     });
 
-    // Log to database
-    logTime(entry.key, elapsedTime, correctedTime, false);
-
-    // Add to lap columns
     const lapNumber = entry.laps.length;
+
+    // Update lap columns first so position can be calculated
     const name = `Lap ${lapNumber}`;
     if (!lapColumns.has(name)) {
       lapColumns.set(name, { data: {} });
       lapOrder.push(name);
     }
-    lapColumns.get(name).data[index] = { elapsedTime, correctedTime };
+    lapColumns.get(name).data[getEntryKey(entry, index)] = { elapsedTime, correctedTime };
+
+    // Calculate position among entries that have recorded this lap (by corrected time)
+    const lapData = lapColumns.get(name);
+    const entriesWithLap = entries
+      .map((e, i) => ({ key: getEntryKey(e, i), correctedTime: lapData.data[getEntryKey(e, i)]?.correctedTime }))
+      .filter(e => e.correctedTime && e.correctedTime !== 'N/A')
+      .sort((a, b) => a.correctedTime.localeCompare(b.correctedTime));
+    const position = entriesWithLap.findIndex(e => e.key === getEntryKey(entry, index)) + 1;
+
+    // Log to database
+    logTime(entry, elapsedTime, correctedTime, lapNumber, false, position);
 
     renderTable();
   }
@@ -349,16 +361,26 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     entry.finished = true;
 
-    // Log to database
-    logTime(entry.key, elapsedTime, correctedTime, true);
+    const lapNumber = entry.laps.length;
 
-    // Add to lap columns
+    // Update lap columns first so position can be calculated
     const name = 'Finish';
     if (!lapColumns.has(name)) {
       lapColumns.set(name, { data: {} });
       lapOrder.push(name);
     }
-    lapColumns.get(name).data[index] = { elapsedTime, correctedTime };
+    lapColumns.get(name).data[getEntryKey(entry, index)] = { elapsedTime, correctedTime };
+
+    // Calculate finish position among entries that have finished (by corrected time)
+    const lapData = lapColumns.get(name);
+    const finishedEntries = entries
+      .map((e, i) => ({ key: getEntryKey(e, i), correctedTime: lapData.data[getEntryKey(e, i)]?.correctedTime }))
+      .filter(e => e.correctedTime && e.correctedTime !== 'N/A')
+      .sort((a, b) => a.correctedTime.localeCompare(b.correctedTime));
+    const position = finishedEntries.findIndex(e => e.key === getEntryKey(entry, index)) + 1;
+
+    // Log to database
+    logTime(entry, elapsedTime, correctedTime, lapNumber, true, position);
 
     renderTable();
   }
@@ -372,9 +394,34 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Start race
-  startRaceBtn.addEventListener('click', () => {
+  startRaceBtn.addEventListener('click', async () => {
     if (entries.length === 0) {
       alert('No entries loaded!');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${baseUrl}/api/races/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          club_id: clubId,
+          series_id: seriesId,
+          entries: entries
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to start race');
+      }
+
+      const data = await res.json();
+      raceId = data.race_id;
+      raceNo = data.race_no;
+      entries = data.entries || entries;
+    } catch (e) {
+      console.error('Error starting race:', e);
+      alert('Error starting race in database.');
       return;
     }
 
@@ -394,7 +441,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // End race
-  endRaceBtn.addEventListener('click', () => {
+  endRaceBtn.addEventListener('click', async () => {
     if (!raceActive) return;
 
     raceEndTime = Date.now();
@@ -417,10 +464,25 @@ document.addEventListener("DOMContentLoaded", async () => {
       raceStartTimeEl.textContent = `${formatTimeHMSFromDate(new Date(raceStartTime))} (ended ${formatTimeHMSFromDate(new Date(raceEndTime))})`;
     }
 
-    updatePositions();
-    renderTable();
-
-    alert('Race ended!');
+    if (raceId) {
+      try {
+        const res = await fetch(`${baseUrl}/api/races/${raceId}/finish`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ race_no: raceNo })
+        });
+        if (!res.ok) {
+          throw new Error('Failed to finish race');
+        }
+        window.location.href = `/race_summary?race_id=${raceId}`;
+      } catch (e) {
+        console.error('Error finishing race:', e);
+        alert('Error finishing race in database.');
+      }
+    } else {
+      updatePositions();
+      renderTable();
+    }
   });
 
   // Initialize

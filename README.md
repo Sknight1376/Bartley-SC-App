@@ -23,22 +23,45 @@ Series list
 
 1. Session fallback
    - If `/api/session/entries` fails, show a user-friendly modal + "try again" / "start new race".
-   - Keep test route for quick dev (`/test_race`).
+
 
 2. Table layout
    - Use CSS classes, not inline styles.
    - `text-align:center` (not `centre`).
    - sticky first columns (“Actions”) and header.
+   Absolutely — great callout, and this is a high-impact UI improvement for better usability.
+        Here’s exactly what sticky first columns (“Actions”) and header means:
+
+        position: sticky on header:
+
+        Keeps the column labels visible when scrolling vertically.
+        With top: 0, the table header “sticks” at top of viewport.
+        position: sticky on first column(s) like Actions:
+
+        Keeps “Actions” buttons in view while scrolling horizontally.
+        With left: 0 (or left: 0/60px if multiple sticky cols), it stays fixed.
+        How this helps:
+
+        For wide row/column sets with many lap columns, user can always press lap/finish without losing row context.
+        Fast operator workflow with less scrolling and fewer mis-controls.
+        Minimal CSS snippet
+        For multiple sticky columns
+        second column: left: 60px or width-of-first
+        etc.
+        Key points
+        Header sticky: always see Actions/Sailor/Boat/... even after vertical scroll.
+        First column sticky: always act on selected row even when horizontal scroll needed for many laps.
+        Combined with row striping + clean horizontal grid improves readability dramatically on race-control screens.
 
 3. Lap cells
    - “Finish” column explicitly.
    - Add per-lap delta (this lap vs best/goal).
    - Show boat status icons (⏳🚤✔️DNF).
 
-4. Timing
+<!-- 4. Timing
    - Running clock via `requestAnimationFrame` for smooth .
    - Option to pause/resume.
-   - Add “split” into lap (split time separate from cumulative).
+   - Add “split” into lap (split time separate from cumulative). -->
 
 5. Data features
    - CSV/JSON export for results.
@@ -54,9 +77,9 @@ Series list
 
 ## 🗄️ Backend improvements
 
-1. Session model consistency
+<!-- 1. Session model consistency
    - Normalize 1 key (`entries`) and/or use `pending_entries`.
-   - Add API for `/session/attributes` once, to avoid mismatched keys.
+   - Add API for `/session/attributes` once, to avoid mismatched keys. -->
 
 2. Persistence & ID
    - `race_id` with DB record on race start.

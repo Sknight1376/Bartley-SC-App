@@ -1,11 +1,6 @@
 from flask import Flask, render_template, jsonify, request, session, redirect
-from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
-
-
-from handicaps.calculations import handicap_calculations
-from handicaps.conversions import time_conversions
 
 
 
@@ -21,10 +16,6 @@ db.Model.metadata.reflect(db.engine, schema='RACINGAPP')
 
 class Boats(db.Model):
     __table__ = db.metadata.tables["RACINGAPP.HANDICAPCONTROL"]
-
-# Reflected RACEMASTER
-class RaceMaster(db.Model):
-    __table__ = db.metadata.tables["RACINGAPP.RACEMASTER"]
 
 # Reflected CLUBCONTROL
 class ClubControl(db.Model):
@@ -43,20 +34,13 @@ class SailorControl(db.Model):
 class BoatControl(db.Model):
     __table__ = db.metadata.tables["RACINGAPP.BOATCONTROL"]
 
-# >>> SET THIS to your real sequence name (schema/case sensitive)
-# Example: '"RACINGAPP"."KEY"'
-KEYUENCE = '"RACINGAPP"."key"'
-
-
-
-
 handicaps = Boats.query.all()
 
 
 # ---------- helpers ----------
 
-def parse_hms_to_time(s: str):
-    """Parse HH:MM:SS or H:MM:SS into python datetime.time."""
+def parse_hms_to_seconds(s: str):
+    """Parse HH:MM:SS or H:MM:SS into integer seconds."""
     s = (s or "").strip()
     if not s:
         return None
@@ -64,7 +48,7 @@ def parse_hms_to_time(s: str):
     if len(parts) != 3:
         raise ValueError(f"Invalid time string: {s}")
     h, m, sec = [int(x) for x in parts]
-    return datetime.strptime(f"{h:02d}:{m:02d}:{sec:02d}", "%H:%M:%S").time()
+    return h * 3600 + m * 60 + sec
 
 
 
@@ -74,7 +58,9 @@ def parse_hms_to_time(s: str):
 def club_entry():
     # Clear any pending entries when returning to club entry page
     # This ensures entries are reset if user changes club/series
-    session.pop("pending_entries", None)
+    session.pop("race", None)
+    session.pop("club_id", None)
+    session.pop("series_id", None)
     return render_template("club_entry.html")
 
 @app.route("/sailor_entry")
@@ -83,166 +69,13 @@ def sailor_entry():
     seriesId = request.args.get('seriesName')
     session['club_id'] = clubId
     session['series_id'] = seriesId  # Store series_id in session
+    race_data = session.get("race", {})
+    race_data["club_id"] = clubId
+    race_data["series_id"] = seriesId
+    session["race"] = race_data
     # Boat list not strictly needed for race now (entries come from sessionStorage),
     # but we pass it anyway in case you want it later.
     return render_template("sailor_entry.html", clubId=clubId)
-
-
-# @app.route("/summary")
-# def summary():
-#     # ... your existing code ...
-#     pending = session.get("pending_entries", [])
-#     # You can pass 'pending' to the template for display if you want
-#     return render_template("summary.html",
-#                            start=start, end=end, duration=duration,
-#                            entry_count=entry_count, results=results,
-#                            club_name=club_name, series_name=series_name, race=race_no,
-#                            pending=pending)
-
-@app.route("/race")
-def race():
-    # Boat list not strictly needed for race now (entries come from sessionStorage),
-    # but we pass it anyway in case you want it later.
-    all_boats = Boats.query.with_entities(Boats.boat, Boats.key).all()
-    return render_template("Race.html", boatarray=[(b.boat, b.key) for b in all_boats])
-
-@app.route('/times', methods=['POST'])
-def times():
-    boat_id = request.form.get('boat_id', type=int)
-    elapsed_time = request.form.get('elapsed')
-    split = request.form.get('split')
-    club_name = request.form.get('club_name', "")
-    series_name = request.form.get('series_name', "")
-    race_no = request.form.get('race', type=int)
-
-    # Safety checks
-    if not boat_id or not elapsed_time or not split:
-        return jsonify({"error": "Missing boat_id / elapsed / split"}), 400
-    if not club_name or not series_name or race_no is None:
-        return jsonify({"error": "Missing club_name / series_name / race"}), 400
-
-    # Resolve club + series IDs
-    with db.engine.begin() as conn:
-        club_id = conn.execute(
-            text('SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name=:n'),
-            {"n": club_name}
-        ).scalar()
-
-        if not club_id:
-            club_id = conn.execute(
-                text('INSERT INTO "RACINGAPP"."CLUBCONTROL"(name) VALUES (:n) RETURNING key'),
-                {"n": club_name}
-            ).scalar()
-
-        series_id = conn.execute(
-            text('SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name=:n'),
-            {"n": series_name}
-        ).scalar()
-
-        if not series_id:
-            series_id = conn.execute(
-                text('INSERT INTO "RACINGAPP"."SERIESCONTROL"(name) VALUES (:n) RETURNING key'),
-                {"n": series_name}
-            ).scalar()
-
-        # handicap lookup
-        matches = [c.handicap for c in handicaps if c.key == boat_id]
-        if not matches:
-            return jsonify({"error": "No handicap for boat"}), 400
-
-        handicap = matches[0]
-        corrected_str = handicap_calculations.corrected_time(elapsed_time, handicap)
-        corrected_seconds = time_conversions.tosecs(corrected_str)
-
-        # Prepare time fields
-        recorded_time = parse_hms_to_time(elapsed_time)
-        corrected_time = parse_hms_to_time(corrected_str)
-        split_time = parse_hms_to_time(split)
-
-
-        # Insert race master record
-        conn.execute(
-            text('''
-                INSERT INTO "RACINGAPP"."RACEMASTER"
-                ( boatkey, club, series, race, recorded_time, corrected_time, time)
-                VALUES (:boatkey, :club, :series, :race, :recorded, :corrected, :t)
-            '''),
-            {
-                "boatkey": boat_id,
-                "club": club_id,
-                "series": series_id,
-                "race": race_no,
-                "recorded": recorded_time,
-                "corrected": corrected_time,
-                "t": split_time
-            }
-        )
-
-        conn.commit()
-
-    return jsonify({
-        "corrected_time": corrected_str,
-        "seconds": corrected_seconds
-    })
-
-# @app.route("/summary")
-# def summary():
-#     start = request.args.get("start", "")
-#     end = request.args.get("end", "")
-#     club_name = request.args.get("club_name", "")
-#     series_name = request.args.get("series_name", "")
-#     race_no = request.args.get("race", type=int)
-
-#     if not club_name or not series_name or race_no is None:
-#         return render_template("summary.html",
-#                                start=start, end=end, duration="",
-#                                entry_count=0, results=[],
-#                                club_name=club_name, series_name=series_name, race=race_no)
-
-#     club_id = get_or_create_club_id(club_name)
-#     series_id = get_or_create_series_id(series_name)
-#     with db.engine.connect() as conn:
-#         entry_count = conn.execute(
-#             text("""
-#             SELECT COUNT(DISTINCT boatkey)
-#             FROM "RACINGAPP"."RACEMASTER"
-#             WHERE club = :club AND series = :series AND race = :race
-#             """),
-#             {"club": club_id, "series": series_id, "race": race_no}
-#         ).scalar() or 0
-
-#         # Final per boat = latest inserted record (max key) for that boat in this race
-#         results = conn.execute(
-#             text("""
-#             WITH final AS (
-#                 SELECT DISTINCT ON (boatkey)
-#                 key, boatkey, recorded_time, corrected_time, time
-#                 FROM "RACINGAPP"."RACEMASTER"
-#                 WHERE club = :club AND series = :series AND race = :race
-#                 ORDER BY boatkey, key DESC
-#             )
-#             SELECT *
-#             FROM final
-#             ORDER BY corrected_time ASC NULLS LAST
-#             """),
-#             {"club": club_id, "series": series_id, "race": race_no}
-#         ).fetchall()
-
-#     duration = ""
-#     try:
-#       if start and end:
-#         dt0 = datetime.fromisoformat(start.replace("Z", "+00:00"))
-#         dt1 = datetime.fromisoformat(end.replace("Z", "+00:00"))
-#         duration = str(dt1 - dt0)
-#     except Exception:
-#       duration = ""
-
-#     return render_template("summary.html",
-#                            start=start, end=end, duration=duration,
-#                            entry_count=entry_count, results=results,
-#                            club_name=club_name, series_name=series_name, race=race_no)
-
-
 
 
 @app.get("/api/clubs")
@@ -284,41 +117,55 @@ def api_entries():
         sailnum = (e.get("sailNumber") or "").strip()
         handicap = (e.get("handicap") or "").strip()
         key = (e.get("key") or "").strip()
+        entry_id = e.get("entry_id")
         if sailor and boat and sailnum:
-            cleaned.append({"sailor": sailor, "boat": boat, "sailNumber": sailnum, "handicap": handicap, "key": key})
+            cleaned_entry = {"sailor": sailor, "boat": boat, "sailNumber": sailnum, "handicap": handicap, "key": key}
+            if entry_id:
+                cleaned_entry["entry_id"] = entry_id
+            cleaned.append(cleaned_entry)
 
     if not cleaned:
         return jsonify({"ok": False, "error": "No valid entries provided"}), 400
 
     # Store in session for the next step (swap to DB later if you prefer)
-    session["pending_entries"] = cleaned
+    race_data = session.get('race', {})
+    race_data['entries'] = cleaned
+    session['race'] = race_data
     return jsonify({"ok": True, "count": len(cleaned)})
 
-@app.get("/api/session/club")
-def api_get_session_club():
-    """Retrieve club_id from session"""
-    club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "No club in session"}), 400
-    return jsonify({"ok": True, "club_id": club_id})
+@app.post("/api/set_club_series")
+def api_set_club_series():
+    payload = request.get_json(silent=True) or {}
+    club_id = payload.get("club_id")
+    series_id = payload.get("series_id")
+    if not club_id or not series_id:
+        return jsonify({"ok": False, "error": "Missing club_id or series_id"}), 400
+    session["club_id"] = club_id
+    session["series_id"] = series_id
+    race_data = session.get("race", {})
+    race_data["club_id"] = club_id
+    race_data["series_id"] = series_id
+    session["race"] = race_data
+    return jsonify({"ok": True})
 
+@app.get("/api/session/attributes")
+def api_get_session_attributes():
+    """Retrieve session attributes in one response"""
+    # Normalize /session attributes under a consistent tree
+    race_data = session.get("race", {})
+    attributes = {
+        "club_id": race_data.get("club_id") or session.get("club_id"),
+        "series_id": race_data.get("series_id") or session.get("series_id"),
+        "entries": race_data.get("entries") or session.get("entries", []),
+        "race_id": race_data.get("race_id"),
+        "race_no": race_data.get("race_no"),
+        "status": race_data.get("status", "not_started")
+    }
 
-
-@app.get("/api/session/series")
-def api_get_session_series():
-    """Retrieve series_id from session"""
-    series_id = session.get("series_id")
-    if not series_id:
-        return jsonify({"ok": False, "error": "No series in session"}), 400
-    return jsonify({"ok": True, "series_id": series_id})
-
-@app.get("/api/session/entries")
-def api_get_session_entries():
-    """Retrieve entries from session"""
-    entries = session.get("pending_entries", [])
-    if not entries:
+    if not attributes["entries"]:
         return jsonify({"ok": False, "error": "No entries in session"}), 400
-    return jsonify({"ok": True, "entries": entries})
+
+    return jsonify({"ok": True, "attributes": attributes})
 
 
 @app.get("/entry_sailor")
@@ -333,80 +180,346 @@ def entry_summary_page():
     """Render the entry summary page"""
     return render_template("entry_summary.html")
 
-# @app.route("/test_race")
-# def test_race():
-#     """Load test entries and redirect to race control"""
-#     session['club'] = 'Test Club'
-#     session['series'] = 'Test Series'
-#     session['entries'] = [
-#         {'key': '1', 'boat': 'Laser 1', 'sailor': 'John Doe', 'handicap': 1100},
-#         {'key': '2', 'boat': 'Laser 2', 'sailor': 'Jane Smith', 'handicap': 1120},
-#         {'key': '3', 'boat': 'Laser 3', 'sailor': 'Bob Johnson', 'handicap': 1080}
-#     ]
-#     return redirect("/race_control")
+@app.route("/test_race")
+def test_race():
+    """Load test entries and redirect to race control"""
+    with db.engine.connect() as conn:
+        club_id = conn.execute(
+            text('SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = :name LIMIT 1'),
+            {"name": "Test Club"}
+        ).scalar()
+        series_id = conn.execute(
+            text('SELECT key FROM "RACINGAPP"."SERIESCONTROL" WHERE name = :name LIMIT 1'),
+            {"name": "Test Series"}
+        ).scalar()
+        rows = conn.execute(
+            text('''
+                SELECT bc.key AS boatkey,
+                       sc.fullname AS sailor,
+                       hc.boat AS boat,
+                       bc.sail_number AS sail_number,
+                       hc.handicap AS handicap
+                FROM "RACINGAPP"."BOATCONTROL" bc
+                JOIN "RACINGAPP"."SAILORCONTROL" sc ON sc.key = bc.sailor
+                JOIN "RACINGAPP"."HANDICAPCONTROL" hc ON hc.key = bc.boat
+                WHERE sc.club = :club_id
+                ORDER BY sc.fullname
+                LIMIT 3
+            '''),
+            {"club_id": club_id}
+        ).mappings().all() if club_id else []
+
+    session['race'] = {
+        'club_id': str(club_id) if club_id is not None else 'Test Club',
+        'series_id': str(series_id) if series_id is not None else 'Test Series',
+        'entries': [
+            {
+                'key': str(row['boatkey']),
+                'boat': row['boat'],
+                'sailor': row['sailor'],
+                'handicap': row['handicap'],
+                'sailNumber': row['sail_number']
+            }
+            for row in rows
+        ] or [
+            {'key': '1', 'boat': 'Laser 1', 'sailor': 'John Doe', 'handicap': 1100, 'sailNumber': '123'},
+            {'key': '2', 'boat': 'Laser 2', 'sailor': 'Jane Smith', 'handicap': 1120, 'sailNumber': '456'},
+            {'key': '3', 'boat': 'Laser 3', 'sailor': 'Bob Johnson', 'handicap': 1080, 'sailNumber': '789'}
+        ],
+        'status': 'not_started'
+    }
+    return redirect("/race_control")
 
 @app.get("/race_control")
 def race_control_page():
     """Render the race control page"""
-    entries = session.get('entries', [])
-    club = session.get('club', '')
-    series = session.get('series', '')
-    return render_template("race_control.html", entries=entries, club=club, series=series)
+    return render_template("race_control.html")
 
 
-@app.get("/api/next_race/<series_id>")
-def api_get_next_race(series_id):
+@app.post("/api/races/start")
+def api_start_race():
+    payload = request.get_json(silent=True) or {}
+    race_data = session.get("race", {})
+    club_id = payload.get("club_id") or race_data.get("club_id") or session.get("club_id")
+    series_id = payload.get("series_id") or race_data.get("series_id") or session.get("series_id")
+    entries = payload.get("entries") or race_data.get("entries") or []
+
+    if not club_id or not series_id:
+        return jsonify({"ok": False, "error": "Missing club_id or series_id"}), 400
+    if not entries:
+        return jsonify({"ok": False, "error": "No entries provided"}), 400
+
+    if race_data.get("race_id") and race_data.get("status") == "active":
+        return jsonify({
+            "ok": True,
+            "race_id": race_data.get("race_id"),
+            "race_no": race_data.get("race_no"),
+            "entries": race_data.get("entries", [])
+        })
+
+    race_id = None
+    race_no = None
+    persisted_entries = []
+
     try:
-        with db.engine.connect() as conn:
-            result = conn.execute(
-                text('SELECT MAX(race) FROM "RACINGAPP"."RACEMASTER" WHERE series = :series'),
+        with db.engine.begin() as conn:
+            race_no = conn.execute(
+                text('SELECT COALESCE(MAX(race_no), 0) + 1 FROM "RACINGAPP"."RACE" WHERE series = :series'),
                 {"series": series_id}
             ).scalar()
-            next_race = (result or 0) + 1
-            return jsonify({"next_race": next_race})
+
+            race_id = conn.execute(
+                text('''
+                    INSERT INTO "RACINGAPP"."RACE" (club, series, race_no, status, started_at)
+                    VALUES (:club, :series, :race_no, :status, CURRENT_TIMESTAMP)
+                    RETURNING key
+                '''),
+                {"club": club_id, "series": series_id, "race_no": race_no, "status": "active"}
+            ).scalar()
+
+            for entry in entries:
+                # Resolve and validate boatkey (must be bigint in RACE_ENTRY)
+                raw_boatkey = entry.get("key")
+                boatkey = None
+                if raw_boatkey not in (None, ""):
+                    try:
+                        boatkey = int(raw_boatkey)
+                    except (TypeError, ValueError):
+                        boatkey = None
+
+                # Fallback resolve by sailor + sail number (+ club when available)
+                if boatkey is None:
+                    club_id_int = None
+                    try:
+                        club_id_int = int(club_id)
+                    except (TypeError, ValueError):
+                        club_id_int = None
+
+                    boatkey = conn.execute(
+                        text('''
+                            SELECT bc.key
+                            FROM "RACINGAPP"."BOATCONTROL" bc
+                            JOIN "RACINGAPP"."SAILORCONTROL" sc ON sc.key = bc.sailor
+                            WHERE sc.fullname = :sailor
+                              AND bc.sail_number = :sail_number
+                              AND (:club_id IS NULL OR sc.club = :club_id)
+                            ORDER BY bc.key DESC
+                            LIMIT 1
+                        '''),
+                        {
+                            "sailor": entry.get("sailor"),
+                            "sail_number": entry.get("sailNumber"),
+                            "club_id": club_id_int
+                        }
+                    ).scalar()
+
+                if boatkey is None:
+                    return jsonify({
+                        "ok": False,
+                        "error": f"Missing/invalid boat key for entry: {entry.get('sailor', 'unknown')} ({entry.get('sailNumber', 'no sail #')}). Re-add this sailor/boat from the entry screen.",
+                        "race_id": race_id,
+                        "race_no": race_no,
+                        "entries": persisted_entries
+                    }), 400
+
+                handicap_raw = entry.get("handicap")
+                handicap = None
+                if handicap_raw not in (None, "", "N/A"):
+                    try:
+                        handicap = int(float(handicap_raw))
+                    except (TypeError, ValueError):
+                        handicap = None
+
+                entry_id = conn.execute(
+                    text('''
+                        INSERT INTO "RACINGAPP"."RACE_ENTRY" (race_id, boatkey, sailor, boat, sail_number, handicap)
+                        VALUES (:race_id, :boatkey, :sailor, :boat, :sail_number, :handicap)
+                        RETURNING key
+                    '''),
+                    {
+                        "race_id": race_id,
+                        "boatkey": boatkey,
+                        "sailor": entry.get("sailor"),
+                        "boat": entry.get("boat"),
+                        "sail_number": entry.get("sailNumber"),
+                        "handicap": handicap
+                    }
+                ).scalar()
+
+                persisted_entry = dict(entry)
+                persisted_entry["entry_id"] = entry_id
+                persisted_entries.append(persisted_entry)
+
+        race_data.update({
+            "club_id": str(club_id),
+            "series_id": str(series_id),
+            "race_id": race_id,
+            "race_no": race_no,
+            "status": "active",
+            "entries": persisted_entries
+        })
+        session["race"] = race_data
+
+        return jsonify({"ok": True, "race_id": race_id, "race_no": race_no, "entries": persisted_entries})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": False, "error": str(e), "race_id": race_id, "race_no": race_no, "entries": persisted_entries}), 500
 
-@app.post("/api/log_race_time")
-def api_log_race_time():
+
+@app.post("/api/races/<int:race_id>/lap")
+def api_record_race_lap(race_id):
     payload = request.get_json(silent=True) or {}
-    boatkey = payload.get("boatkey")
-    elapsed_time = payload.get("elapsed_time")  # HH:MM:SS
-    corrected_time = payload.get("corrected_time")  # HH:MM:SS
-    club_id = payload.get("club_id")
-    series_id = payload.get("series_id")
-    race_no = payload.get("race_no")
-    is_finish = payload.get("is_finish", False)
+    entry_id = payload.get("entry_id")
+    lap_number = payload.get("lap_number")
+    elapsed_time = payload.get("elapsed_time")
+    corrected_time = payload.get("corrected_time")
+    position = payload.get("position")
+    is_finish = bool(payload.get("is_finish", False))
 
-    if not all([boatkey, elapsed_time, corrected_time, club_id, series_id, race_no]):
-        return jsonify({"error": "Missing required fields"}), 400
+    if not all([entry_id, lap_number, elapsed_time]):
+        return jsonify({"ok": False, "error": "Missing required lap fields"}), 400
 
     try:
-        recorded_time = parse_hms_to_time(elapsed_time)
-        corrected_time_parsed = parse_hms_to_time(corrected_time)
-        split_time = recorded_time  # Assuming split is the elapsed for now
+        elapsed_sec = parse_hms_to_seconds(elapsed_time)
+        corrected_sec = parse_hms_to_seconds(corrected_time) if corrected_time and corrected_time != "N/A" else None
 
         with db.engine.begin() as conn:
+            entry_exists = conn.execute(
+                text('SELECT 1 FROM "RACINGAPP"."RACE_ENTRY" WHERE key = :entry_id AND race_id = :race_id'),
+                {"entry_id": entry_id, "race_id": race_id}
+            ).scalar()
+
+            if not entry_exists:
+                return jsonify({"ok": False, "error": "Race entry not found"}), 404
+
             conn.execute(
                 text('''
-                    INSERT INTO "RACINGAPP"."RACEMASTER"
-                    ( boatkey, club, series, race, recorded_time, corrected_time, time)
-                    VALUES (:boatkey, :club, :series, :race, :recorded, :corrected, :t)
+                    INSERT INTO "RACINGAPP"."LAP" (race_entry_id, lap_number, is_finish, elapsed_sec, corrected_sec, position)
+                    VALUES (:race_entry_id, :lap_number, :is_finish, :elapsed_sec, :corrected_sec, :position)
                 '''),
                 {
-                    "boatkey": boatkey,
-                    "club": club_id,
-                    "series": series_id,
-                    "race": race_no,
-                    "recorded": recorded_time,
-                    "corrected": corrected_time_parsed,
-                    "t": split_time
+                    "race_entry_id": entry_id,
+                    "lap_number": lap_number,
+                    "is_finish": is_finish,
+                    "elapsed_sec": elapsed_sec,
+                    "corrected_sec": corrected_sec,
+                    "position": position
                 }
             )
 
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/races/<int:race_id>/finish")
+def api_finish_race(race_id):
+    try:
+        with db.engine.begin() as conn:
+            updated = conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."RACE"
+                    SET status = :status,
+                        ended_at = CURRENT_TIMESTAMP
+                    WHERE key = :race_id
+                '''),
+                {"status": "finished", "race_id": race_id}
+            )
+
+        if updated.rowcount == 0:
+            return jsonify({"ok": False, "error": "Race not found"}), 404
+
+        race_data = session.get("race", {})
+        if race_data.get("race_id") == race_id:
+            race_data["status"] = "finished"
+            session["race"] = race_data
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/race_summary")
+def race_summary_page():
+    """Render the race summary page"""
+    return render_template("race_summary.html")
+
+
+@app.get("/api/races/<int:race_id>/summary")
+def api_race_summary(race_id):
+    """Return full race summary: metadata + results per entry"""
+    try:
+        with db.engine.connect() as conn:
+            race_row = conn.execute(
+                text('''
+                    SELECT r.race_no, r.started_at, r.ended_at, r.status,
+                           cc.name AS club_name, sc.name AS series_name
+                    FROM "RACINGAPP"."RACE" r
+                    JOIN "RACINGAPP"."CLUBCONTROL" cc ON r.club = cc.key
+                    JOIN "RACINGAPP"."SERIESCONTROL" sc ON r.series = sc.key
+                    WHERE r.key = :race_id
+                '''),
+                {"race_id": race_id}
+            ).mappings().first()
+
+            if not race_row:
+                return jsonify({"ok": False, "error": "Race not found"}), 404
+
+            results_rows = conn.execute(
+                text('''
+                    SELECT re.key AS entry_id,
+                           re.sailor, re.boat, re.sail_number, re.handicap,
+                           COUNT(l.key) AS lap_count,
+                           MAX(CASE WHEN l.is_finish THEN l.elapsed_sec   END) AS final_elapsed_sec,
+                           MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS final_corrected_sec,
+                           MAX(CASE WHEN l.is_finish THEN l.position      END) AS final_position
+                    FROM "RACINGAPP"."RACE_ENTRY" re
+                    LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
+                    WHERE re.race_id = :race_id
+                    GROUP BY re.key, re.sailor, re.boat, re.sail_number, re.handicap
+                    ORDER BY MAX(CASE WHEN l.is_finish THEN l.position      END) ASC NULLS LAST,
+                             MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) ASC NULLS LAST
+                '''),
+                {"race_id": race_id}
+            ).mappings().all()
+
+        def secs_to_hms(s):
+            if s is None:
+                return None
+            s = int(s)
+            return f"{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}"
+
+        started_at = race_row["started_at"]
+        ended_at   = race_row["ended_at"]
+        duration_sec = int((ended_at - started_at).total_seconds()) if started_at and ended_at else None
+
+        race_info = {
+            "race_no":     race_row["race_no"],
+            "club_name":   race_row["club_name"],
+            "series_name": race_row["series_name"],
+            "started_at":  started_at.strftime("%H:%M:%S") if started_at else None,
+            "date":        started_at.strftime("%d %B %Y") if started_at else None,
+            "duration":    secs_to_hms(duration_sec),
+        }
+
+        results = [
+            {
+                "entry_id":      row["entry_id"],
+                "sailor":        row["sailor"],
+                "boat":          row["boat"],
+                "sail_number":   row["sail_number"],
+                "handicap":      row["handicap"],
+                "lap_count":     int(row["lap_count"]) if row["lap_count"] else 0,
+                "elapsed_time":  secs_to_hms(row["final_elapsed_sec"]),
+                "corrected_time":secs_to_hms(row["final_corrected_sec"]),
+                "position":      row["final_position"],
+                "dnf":           row["final_position"] is None,
+            }
+            for row in results_rows
+        ]
+
+        return jsonify({"ok": True, "race": race_info, "results": results})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":
