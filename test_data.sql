@@ -60,6 +60,16 @@ INSERT INTO "RACINGAPP"."SAILORCONTROL" (key, FullName, FirstName, LastName, clu
 (nextval('key'), 'Steve Hall', 'Steve', 'Hall', (SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = 'Warsash Sailing Club'));
 
 -- ===========================================
+-- 3b. SAILOR USERS (default password: ChangeMe123!)
+-- ===========================================
+INSERT INTO "RACINGAPP"."SAILORUSER" (key, sailor, username, password_hash) VALUES
+(nextval('key'), (SELECT key FROM "RACINGAPP"."SAILORCONTROL" WHERE FullName = 'John Smith'), 'john_smith', crypt('ChangeMe123!', gen_salt('bf'))),
+(nextval('key'), (SELECT key FROM "RACINGAPP"."SAILORCONTROL" WHERE FullName = 'Sarah Johnson'), 'sarah_johnson', crypt('ChangeMe123!', gen_salt('bf'))),
+(nextval('key'), (SELECT key FROM "RACINGAPP"."SAILORCONTROL" WHERE FullName = 'Mike Wilson'), 'mike_wilson', crypt('ChangeMe123!', gen_salt('bf'))),
+(nextval('key'), (SELECT key FROM "RACINGAPP"."SAILORCONTROL" WHERE FullName = 'Emma Davis'), 'emma_davis', crypt('ChangeMe123!', gen_salt('bf'))),
+(nextval('key'), (SELECT key FROM "RACINGAPP"."SAILORCONTROL" WHERE FullName = 'David Brown'), 'david_brown', crypt('ChangeMe123!', gen_salt('bf')));
+
+-- ===========================================
 -- 4. BOAT DATA (linking sailors to boat classes)
 -- ===========================================
 -- Get some handicap keys for popular boat classes
@@ -139,6 +149,8 @@ UNION ALL
 SELECT 'Handicaps:', COUNT(*) FROM "RACINGAPP"."HANDICAPCONTROL"
 UNION ALL
 SELECT 'Club Users:', COUNT(*) FROM "RACINGAPP"."CLUBUSER"
+UNION ALL
+SELECT 'Sailor Users:', COUNT(*) FROM "RACINGAPP"."SAILORUSER"
 UNION ALL
 SELECT 'Persisted Races:', COUNT(*) FROM "RACINGAPP"."RACE"
 UNION ALL

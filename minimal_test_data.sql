@@ -25,6 +25,14 @@ INSERT INTO "RACINGAPP"."SAILORCONTROL" (key, FullName, FirstName, LastName, clu
 (nextval('key'), 'Bob Test', 'Bob', 'Test', (SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = 'Test Club')),
 (nextval('key'), 'Charlie Test', 'Charlie', 'Test', (SELECT key FROM "RACINGAPP"."CLUBCONTROL" WHERE name = 'Test Club'));
 
+INSERT INTO "RACINGAPP"."SAILORUSER" (key, sailor, username, password_hash)
+VALUES (
+	nextval('key'),
+	(SELECT key FROM "RACINGAPP"."SAILORCONTROL" WHERE FullName = 'Alice Test'),
+	'alice_test',
+	crypt('ChangeMe123!', gen_salt('bf'))
+);
+
 -- ===========================================
 -- BASIC BOATS (using existing handicap data)
 -- ===========================================

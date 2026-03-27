@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="static/js/jquery-3.6.3.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+  <style>
+    .portal-wrap { width: 990px; margin: 20px auto; }
+    .card { background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:16px; margin-bottom:16px; }
+    .card h3 { margin:0 0 12px; color:#1331C5; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+    .field { flex:1; min-width:160px; }
+    .field label { display:block; font-size:12px; color:#666; margin-bottom:4px; }
+    .field input, .field select { width:100%; height:34px; border:1px solid #d0d0d0; border-radius:6px; padding:0 8px; }
+    .btn { background:#1331C5; color:#fff; border:0; border-radius:6px; height:34px; padding:0 12px; cursor:pointer; }
+    .btn.secondary { background:#6b7280; }
+    .table { width:100%; border-collapse:collapse; }
+    .table th { background:#e0e0e0; text-align:left; padding:8px; border-bottom:2px solid #d0d0d0; }
+    .table td { padding:8px; border-bottom:1px solid #ececec; }
+    .muted { color:#888; }
+  </style>
+</head>
+<body>
+
+<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
+<section class="banner"></section>
+<br>
+
+<div class="form-border" style="text-align:center;">
+  <h4 style="color:#979797">Sailor Spoke Portal</h4>
+  <h2>Mobile Feature Preview</h2>
+  <h4 style="color:#979797">Login as a sailor, join upcoming races, view results, and edit your profile</h4>
+</div>
+
+<div class="portal-wrap">
+  <div class="card" id="loginCard">
+    <h3>Sailor Login</h3>
+    <div class="row">
+      <div class="field"><label>Username</label><input id="username" type="text" placeholder="e.g. alice_test"></div>
+      <div class="field"><label>Password</label><input id="password" type="password" placeholder="ChangeMe123!"></div>
+      <button class="btn" id="loginBtn">Login</button>
+      <button class="btn secondary" id="logoutBtn">Logout</button>
+    </div>
+    <div id="loginState" class="muted" style="margin-top:8px;">Not logged in</div>
+  </div>
+
+  <div class="card">
+    <h3>My Profile</h3>
+    <div class="row">
+      <div class="field"><label>First Name</label><input id="firstName" type="text"></div>
+      <div class="field"><label>Last Name</label><input id="lastName" type="text"></div>
+      <button class="btn" id="saveProfileBtn">Save Profile</button>
+    </div>
+    <div style="margin-top:10px;">
+      <strong>My Boats</strong>
+      <ul id="myBoats"></ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Upcoming / Active Races</h3>
+    <table class="table">
+      <thead>
+        <tr><th>Race</th><th>Series</th><th>Status</th><th>Join</th><th>Results</th></tr>
+      </thead>
+      <tbody id="racesBody"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>My Race Results</h3>
+    <table class="table">
+      <thead>
+        <tr><th>Sailor</th><th>Boat</th><th>Sail #</th><th>Position</th><th>Elapsed</th><th>Corrected</th></tr>
+      </thead>
+      <tbody id="myResultsBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let myBoats = [];
+
+function setLoginState(text) { document.getElementById('loginState').textContent = text; }
+
+async function login() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const res = await fetch('/api/mobile/login', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ username, password })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Login failed');
+    return;
+  }
+  setLoginState(`Logged in as ${data.username}`);
+  await loadMe();
+  await loadRaces();
+}
+
+async function logout() {
+  await fetch('/api/mobile/logout', { method: 'POST' });
+  setLoginState('Not logged in');
+  document.getElementById('myBoats').innerHTML = '';
+  document.getElementById('racesBody').innerHTML = '';
+  document.getElementById('myResultsBody').innerHTML = '';
+}
+
+async function loadMe() {
+  const res = await fetch('/api/mobile/me', { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) return;
+
+  document.getElementById('firstName').value = data.profile.first_name || '';
+  document.getElementById('lastName').value = data.profile.last_name || '';
+  myBoats = data.boats || [];
+  const ul = document.getElementById('myBoats');
+  ul.innerHTML = myBoats.length
+    ? myBoats.map(b => `<li>${b.boat} — Sail ${b.sail_number} (HC ${b.handicap})</li>`).join('')
+    : '<li class="muted">No boats configured for this sailor.</li>';
+}
+
+async function saveProfile() {
+  const first_name = document.getElementById('firstName').value.trim();
+  const last_name = document.getElementById('lastName').value.trim();
+  const res = await fetch('/api/mobile/me', {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ first_name, last_name })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to save profile');
+    return;
+  }
+  alert('Profile updated');
+}
+
+async function loadRaces() {
+  const res = await fetch('/api/mobile/races/upcoming', { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) return;
+
+  const tbody = document.getElementById('racesBody');
+  tbody.innerHTML = '';
+  (data.races || []).forEach(r => {
+    const boatOptions = myBoats.map(b => `<option value="${b.boat_key}">${b.boat} / ${b.sail_number}</option>`).join('');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>#${r.race_no}</td>
+      <td>${r.series_name}</td>
+      <td>${r.status}${r.joined ? ' (joined)' : ''}</td>
+      <td>
+        <select id="boat-${r.race_id}" style="height:30px;">
+          <option value="">Select boat…</option>${boatOptions}
+        </select>
+        <button class="btn" style="height:30px;" onclick="joinRace(${r.race_id})">Join</button>
+      </td>
+      <td><button class="btn secondary" style="height:30px;" onclick="loadResults(${r.race_id})">View</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  if ((data.races || []).length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="5" class="muted">No upcoming or active races found.</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+async function joinRace(raceId) {
+  const boat_key = document.getElementById(`boat-${raceId}`).value;
+  if (!boat_key) {
+    alert('Select a boat first.');
+    return;
+  }
+  const res = await fetch(`/api/mobile/races/${raceId}/join`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ boat_key })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to join race');
+    return;
+  }
+  alert('Joined race');
+  await loadRaces();
+}
+
+async function loadResults(raceId) {
+  const res = await fetch(`/api/mobile/races/${raceId}/results`, { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to load results');
+    return;
+  }
+
+  const tbody = document.getElementById('myResultsBody');
+  tbody.innerHTML = '';
+  (data.my_results || []).forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.sailor}</td><td>${r.boat}</td><td>${r.sail_number}</td><td>${r.position ?? '—'}</td><td>${r.elapsed_time ?? '—'}</td><td>${r.corrected_time ?? '—'}</td>`;
+    tbody.appendChild(tr);
+  });
+  if ((data.my_results || []).length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="6" class="muted">No result recorded yet for this race.</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById('loginBtn').addEventListener('click', login);
+document.getElementById('logoutBtn').addEventListener('click', logout);
+document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
+</script>
+</body>
+</html>

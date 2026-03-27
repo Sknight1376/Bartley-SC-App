@@ -23,6 +23,7 @@
   <button id="newRaceBtn" class="blue-button" style="left: 0; right: auto;">Start New Race</button>
   <button id="membersBtn" class="blue-button" style="left: 33%; right: auto;">Manage Members</button>
   <button id="seriesBtn" class="blue-button" style="left: 66%; right: auto;">Manage Series</button>
+  <button id="sailorPortalBtn" class="blue-button" style="left: 66%; right: auto;">Sailor Portal</button>
   <!-- <button id="testRaceBtn" class="blue-button" style="left: 25%; transform: translateX(-50%);">Open Test Race</button> -->
   <button id="logoutBtn" class="blue-button">Logout</button>
 </div>
@@ -38,6 +39,10 @@ document.getElementById('membersBtn').addEventListener('click', () => {
 
 document.getElementById('seriesBtn').addEventListener('click', () => {
   window.location.href = '/series';
+});
+
+document.getElementById('sailorPortalBtn').addEventListener('click', () => {
+  window.location.href = '/sailor_portal';
 });
 
 const testRaceBtn = document.getElementById('testRaceBtn');

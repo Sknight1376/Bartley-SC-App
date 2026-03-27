@@ -128,6 +128,367 @@ def api_logout():
     return jsonify({"ok": True})
 
 
+@app.get("/sailor_portal")
+def sailor_portal_page():
+    return render_template("sailor_portal.html")
+
+
+@app.post("/api/mobile/login")
+def api_mobile_login():
+    payload = request.get_json(silent=True) or {}
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+
+    if not username or not password:
+        return jsonify({"ok": False, "error": "Missing username or password"}), 400
+
+    try:
+        with db.engine.begin() as conn:
+            sailor_user = conn.execute(
+                text('''
+                    SELECT su.key AS sailor_user_id,
+                           su.username,
+                           su.sailor AS sailor_id,
+                           sc.club,
+                           sc.fullname,
+                           sc.firstname,
+                           sc.lastname
+                    FROM "RACINGAPP"."SAILORUSER" su
+                    JOIN "RACINGAPP"."SAILORCONTROL" sc ON sc.key = su.sailor
+                    WHERE LOWER(su.username) = LOWER(:username)
+                      AND su.is_active = TRUE
+                      AND su.password_hash = crypt(:password, su.password_hash)
+                    LIMIT 1
+                '''),
+                {"username": username, "password": password}
+            ).mappings().first()
+
+            if not sailor_user:
+                return jsonify({"ok": False, "error": "Invalid username or password"}), 401
+
+            conn.execute(
+                text('UPDATE "RACINGAPP"."SAILORUSER" SET last_login = CURRENT_TIMESTAMP WHERE key = :user_id'),
+                {"user_id": sailor_user["sailor_user_id"]}
+            )
+
+        session["sailor_user_id"] = str(sailor_user["sailor_user_id"])
+        session["sailor_id"] = str(sailor_user["sailor_id"])
+        session["sailor_username"] = sailor_user["username"]
+        session["sailor_club_id"] = str(sailor_user["club"])
+
+        return jsonify({
+            "ok": True,
+            "username": sailor_user["username"],
+            "sailor_id": sailor_user["sailor_id"],
+            "full_name": sailor_user["fullname"],
+            "first_name": sailor_user["firstname"],
+            "last_name": sailor_user["lastname"]
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/mobile/logout")
+def api_mobile_logout():
+    for key in ["sailor_user_id", "sailor_id", "sailor_username", "sailor_club_id"]:
+        session.pop(key, None)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/mobile/me")
+def api_mobile_me():
+    sailor_id = session.get("sailor_id")
+    club_id = session.get("sailor_club_id")
+    if not sailor_id or not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            sailor = conn.execute(
+                text('''
+                    SELECT key, fullname, firstname, lastname, club
+                    FROM "RACINGAPP"."SAILORCONTROL"
+                    WHERE key = :sailor_id
+                      AND club = :club_id
+                '''),
+                {"sailor_id": sailor_id, "club_id": club_id}
+            ).mappings().first()
+
+            if not sailor:
+                return jsonify({"ok": False, "error": "Sailor not found"}), 404
+
+            boats = conn.execute(
+                text('''
+                    SELECT bc.key AS boat_key,
+                           bc.sail_number,
+                           hc.boat,
+                           hc.handicap
+                    FROM "RACINGAPP"."BOATCONTROL" bc
+                    JOIN "RACINGAPP"."HANDICAPCONTROL" hc ON hc.key = bc.boat
+                    WHERE bc.sailor = :sailor_id
+                    ORDER BY bc.key DESC
+                '''),
+                {"sailor_id": sailor_id}
+            ).mappings().all()
+
+        return jsonify({
+            "ok": True,
+            "profile": {
+                "id": sailor["key"],
+                "full_name": sailor["fullname"],
+                "first_name": sailor["firstname"],
+                "last_name": sailor["lastname"],
+                "username": session.get("sailor_username")
+            },
+            "boats": [dict(b) for b in boats]
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.put("/api/mobile/me")
+def api_mobile_update_me():
+    sailor_id = session.get("sailor_id")
+    club_id = session.get("sailor_club_id")
+    if not sailor_id or not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    first_name = (payload.get("first_name") or "").strip()
+    last_name = (payload.get("last_name") or "").strip()
+    if not first_name:
+        return jsonify({"ok": False, "error": "first_name is required"}), 400
+
+    full_name = f"{first_name} {last_name}".strip()
+
+    try:
+        with db.engine.begin() as conn:
+            updated = conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."SAILORCONTROL"
+                    SET fullname = :fullname,
+                        firstname = :firstname,
+                        lastname = :lastname
+                    WHERE key = :sailor_id
+                      AND club = :club_id
+                '''),
+                {
+                    "fullname": full_name,
+                    "firstname": first_name,
+                    "lastname": last_name or None,
+                    "sailor_id": sailor_id,
+                    "club_id": club_id
+                }
+            )
+
+        if updated.rowcount == 0:
+            return jsonify({"ok": False, "error": "Sailor not found"}), 404
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/mobile/races/upcoming")
+def api_mobile_upcoming_races():
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id or not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            races = conn.execute(
+                text('''
+                    SELECT r.key AS race_id,
+                           r.race_no,
+                           r.status,
+                           r.started_at,
+                           sc.name AS series_name,
+                           CASE WHEN EXISTS (
+                               SELECT 1
+                               FROM "RACINGAPP"."RACE_ENTRY" re
+                               JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
+                               WHERE re.race_id = r.key
+                                 AND bc.sailor = :sailor_id
+                           ) THEN TRUE ELSE FALSE END AS joined
+                    FROM "RACINGAPP"."RACE" r
+                    JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+                    WHERE r.club = :club_id
+                      AND r.status IN ('not_started', 'active')
+                    ORDER BY r.started_at DESC NULLS LAST, r.key DESC
+                '''),
+                {"club_id": club_id, "sailor_id": sailor_id}
+            ).mappings().all()
+
+        return jsonify({"ok": True, "races": [dict(r) for r in races]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/mobile/races/<int:race_id>/join")
+def api_mobile_join_race(race_id):
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id or not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    boat_key = payload.get("boat_key")
+    if not boat_key:
+        return jsonify({"ok": False, "error": "boat_key is required"}), 400
+
+    try:
+        with db.engine.begin() as conn:
+            race_row = conn.execute(
+                text('''
+                    SELECT key, status
+                    FROM "RACINGAPP"."RACE"
+                    WHERE key = :race_id
+                      AND club = :club_id
+                '''),
+                {"race_id": race_id, "club_id": club_id}
+            ).mappings().first()
+
+            if not race_row:
+                return jsonify({"ok": False, "error": "Race not found"}), 404
+            if race_row["status"] == "finished":
+                return jsonify({"ok": False, "error": "Race already finished"}), 409
+
+            boat_row = conn.execute(
+                text('''
+                    SELECT bc.key AS boat_key,
+                           bc.sail_number,
+                           hc.boat,
+                           hc.handicap,
+                           sc.fullname
+                    FROM "RACINGAPP"."BOATCONTROL" bc
+                    JOIN "RACINGAPP"."HANDICAPCONTROL" hc ON hc.key = bc.boat
+                    JOIN "RACINGAPP"."SAILORCONTROL" sc ON sc.key = bc.sailor
+                    WHERE bc.key = :boat_key
+                      AND bc.sailor = :sailor_id
+                      AND sc.club = :club_id
+                '''),
+                {"boat_key": boat_key, "sailor_id": sailor_id, "club_id": club_id}
+            ).mappings().first()
+
+            if not boat_row:
+                return jsonify({"ok": False, "error": "Boat not found for sailor"}), 404
+
+            existing = conn.execute(
+                text('SELECT 1 FROM "RACINGAPP"."RACE_ENTRY" WHERE race_id = :race_id AND boatkey = :boat_key'),
+                {"race_id": race_id, "boat_key": boat_key}
+            ).scalar()
+            if existing:
+                return jsonify({"ok": True, "joined": True, "message": "Already joined"})
+
+            conn.execute(
+                text('''
+                    INSERT INTO "RACINGAPP"."RACE_ENTRY" (key, race_id, boatkey, sailor, boat, sail_number, handicap)
+                    VALUES (nextval('key'), :race_id, :boatkey, :sailor, :boat, :sail_number, :handicap)
+                '''),
+                {
+                    "race_id": race_id,
+                    "boatkey": boat_row["boat_key"],
+                    "sailor": boat_row["fullname"],
+                    "boat": boat_row["boat"],
+                    "sail_number": boat_row["sail_number"],
+                    "handicap": boat_row["handicap"]
+                }
+            )
+
+        return jsonify({"ok": True, "joined": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/mobile/races/<int:race_id>/results")
+def api_mobile_race_results(race_id):
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id or not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            race_exists = conn.execute(
+                text('SELECT 1 FROM "RACINGAPP"."RACE" WHERE key = :race_id AND club = :club_id'),
+                {"race_id": race_id, "club_id": club_id}
+            ).scalar()
+            if not race_exists:
+                return jsonify({"ok": False, "error": "Race not found"}), 404
+
+            my_results = conn.execute(
+                text('''
+                    SELECT re.key AS entry_id,
+                           re.sailor,
+                           re.boat,
+                           re.sail_number,
+                           MAX(CASE WHEN l.is_finish THEN l.position END) AS position,
+                           MAX(CASE WHEN l.is_finish THEN l.elapsed_sec END) AS elapsed_sec,
+                           MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS corrected_sec
+                    FROM "RACINGAPP"."RACE_ENTRY" re
+                    JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
+                    LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
+                    WHERE re.race_id = :race_id
+                      AND bc.sailor = :sailor_id
+                    GROUP BY re.key, re.sailor, re.boat, re.sail_number
+                    ORDER BY position ASC NULLS LAST, corrected_sec ASC NULLS LAST
+                '''),
+                {"race_id": race_id, "sailor_id": sailor_id}
+            ).mappings().all()
+
+            leaderboard = conn.execute(
+                text('''
+                    SELECT re.sailor,
+                           re.boat,
+                           re.sail_number,
+                           MAX(CASE WHEN l.is_finish THEN l.position END) AS position,
+                           MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS corrected_sec
+                    FROM "RACINGAPP"."RACE_ENTRY" re
+                    LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
+                    WHERE re.race_id = :race_id
+                    GROUP BY re.key, re.sailor, re.boat, re.sail_number
+                    ORDER BY position ASC NULLS LAST, corrected_sec ASC NULLS LAST
+                '''),
+                {"race_id": race_id}
+            ).mappings().all()
+
+        def secs_to_hms(s):
+            if s is None:
+                return None
+            s = int(s)
+            return f"{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}"
+
+        return jsonify({
+            "ok": True,
+            "my_results": [
+                {
+                    "entry_id": r["entry_id"],
+                    "sailor": r["sailor"],
+                    "boat": r["boat"],
+                    "sail_number": r["sail_number"],
+                    "position": r["position"],
+                    "elapsed_time": secs_to_hms(r["elapsed_sec"]),
+                    "corrected_time": secs_to_hms(r["corrected_sec"])
+                }
+                for r in my_results
+            ],
+            "leaderboard": [
+                {
+                    "sailor": r["sailor"],
+                    "boat": r["boat"],
+                    "sail_number": r["sail_number"],
+                    "position": r["position"],
+                    "corrected_time": secs_to_hms(r["corrected_sec"])
+                }
+                for r in leaderboard
+            ]
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.get("/landing")
 def landing_page():
     club_id = session.get("club_id")
