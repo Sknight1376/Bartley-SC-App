@@ -21,9 +21,10 @@ class InMemoryCookieJar : CookieJar {
 }
 
 object Network {
-    // TODO: Change to your reachable backend URL for emulator/device.
-    // Emulator + local flask: http://10.0.2.2:5000/
-    private const val BASE_URL = "http://10.0.2.2:5000/"
+    // ADB reverse forwarding: phone connects to its own localhost:5000
+    // which tunnels over USB to Windows localhost:5000. No firewall needed.
+    // Switch to http://10.0.2.2:5000/ if using an emulator instead.
+    private const val BASE_URL = "http://127.0.0.1:5000/"
 
     private val cookieJar = InMemoryCookieJar()
 

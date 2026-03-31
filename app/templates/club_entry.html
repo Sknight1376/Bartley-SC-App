@@ -23,7 +23,7 @@
     <br>
 <h4 style="color: #979797">Step One</h4>
 <h2>Club Details</h2>
-<h4 style="color: #979797">Your club is identified from login. Select the series for this race.</h4>
+<h4 style="color: #979797">Your club is identified from login. Select the specific upcoming race (next available per active series).</h4>
   <form class="form-inline">
     <div style="vertical-align: middle; padding-left: 110px; padding-right: 110px; width:100%;">
       <label style="color: black;">Club</label>
@@ -33,8 +33,8 @@
     </div>
 
     <div style="vertical-align: middle;">
-    <label for="seriesName" style = "color: black;">Series</label>
-    <select id="seriesName" aria-label="Select series" disabled>
+    <label for="raceName" style = "color: black;">Upcoming Race</label>
+    <select id="raceName" aria-label="Select race" disabled>
     </select>
 
     </div>
@@ -52,13 +52,16 @@
   document.addEventListener("DOMContentLoaded", async () => {
     const clubId = {{ clubId | tojson }};
 
-    // Load series for logged-in club
-    await loadPrimaryDropdown("#seriesName", `/api/series/${clubId}`,
-      data => data.series,
+    // Load next race in each active series for logged-in club
+    await loadPrimaryDropdown("#raceName", `/api/races/upcoming/${clubId}`,
+      data => (data.races || []).map(r => ({
+        id: { race_id: r.race_id, series_id: r.series_id },
+        name: `${r.series_name} - Race ${r.race_no} (${r.started_at || 'No date'})`
+      })),
       {
         valueField: "id",
         labelField: "name",
-        placeholder: "Select a series…"
+        placeholder: "Select an upcoming race…"
       }
     );
   });
@@ -72,30 +75,39 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Enable Next button only when required selects are chosen
     enableButtonWhenAllSelected("#nextButton", [
-        "#seriesName"
+      "#raceName"
     ]);
 
     // On click: go to next page
     document.querySelector("#nextButton").addEventListener("click", async () => {
-        const seriesSelect = document.querySelector("#seriesName");
-    const selectedClubId = clubId;
-        const selectedSeriesId = seriesSelect.value;
+      const raceSelect = document.querySelector("#raceName");
+      const selectedClubId = clubId;
+      const selectedRaceValue = raceSelect.value;
+      let selectedRace = null;
+      try {
+        selectedRace = JSON.parse(selectedRaceValue || "{}");
+      } catch (e) {
+        selectedRace = null;
+      }
+      const selectedSeriesId = selectedRace?.series_id;
+      const selectedRaceId = selectedRace?.race_id;
 
-        if (!selectedClubId || !selectedSeriesId) {
-            alert('Please select club and series');
+      if (!selectedClubId || !selectedSeriesId || !selectedRaceId) {
+        alert('Please select an upcoming race');
             return;
         }
 
         // Set sessionStorage
         sessionStorage.setItem('club', selectedClubId);
         sessionStorage.setItem('series', selectedSeriesId);
+        sessionStorage.setItem('race_id', selectedRaceId);
 
         // Set server session
         try {
             const res = await fetch('/api/set_club_series', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ club_id: selectedClubId, series_id: selectedSeriesId })
+              body: JSON.stringify({ club_id: selectedClubId, series_id: selectedSeriesId, race_id: selectedRaceId })
             });
             if (!res.ok) {
                 alert('Failed to set session');
@@ -109,6 +121,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const params = new URLSearchParams();
         params.append("clubName", selectedClubId);
         params.append("seriesName", selectedSeriesId);
+        params.append("raceId", selectedRaceId);
 
         window.location.href = `/sailor_entry?${params.toString()}`;
     });
@@ -116,7 +129,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 enableButtonWhenAllSelected("#nextButton", [
-  "#seriesName"
+  "#raceName"
 ]);
 
 </script>

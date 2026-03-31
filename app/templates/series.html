@@ -43,6 +43,26 @@
         <label for="newSeriesYear">Year</label>
         <input id="newSeriesYear" type="text" placeholder="e.g. 2026">
       </div>
+      <div class="field" style="max-width:140px;">
+        <label for="newRaceCount">Race Count</label>
+        <input id="newRaceCount" type="number" min="1" value="6">
+      </div>
+      <div class="field" style="max-width:170px;">
+        <label for="newDayOfWeek">Day</label>
+        <input id="newDayOfWeek" type="text" placeholder="Saturday" value="Saturday">
+      </div>
+      <div class="field" style="max-width:130px;">
+        <label for="newStartHour">Start Hour</label>
+        <input id="newStartHour" type="number" min="0" max="23" value="11">
+      </div>
+      <div class="field" style="max-width:130px;">
+        <label for="newStartMinute">Start Min</label>
+        <input id="newStartMinute" type="number" min="0" max="59" value="0">
+      </div>
+      <div class="field" style="max-width:140px;">
+        <label for="newRacesPerDay">Races/Day</label>
+        <input id="newRacesPerDay" type="number" min="1" value="1">
+      </div>
       <button id="addSeriesBtn" class="btn">Add Series</button>
     </div>
   </div>
@@ -52,7 +72,9 @@
       <tr>
         <th style="width:45%;">Series Name</th>
         <th style="width:20%;">Year</th>
-        <th style="width:35%;">Actions</th>
+        <th style="width:15%;">Races</th>
+        <th style="width:20%;">Next Race</th>
+        <th style="width:20%;">Actions</th>
       </tr>
     </thead>
     <tbody id="seriesBody"></tbody>
@@ -94,6 +116,8 @@ function renderSeries() {
     tr.innerHTML = `
       <td><input id="name-${s.key}" class="small-input" style="width:95%;" value="${esc(s.name)}"></td>
       <td><input id="year-${s.key}" class="small-input" style="width:90%;" value="${esc(s.year)}"></td>
+      <td>${esc(s.total_races ?? 0)}</td>
+      <td>${esc(s.next_race_at ?? '-')}</td>
       <td>
         <button class="btn secondary" onclick="saveSeries(${s.key})">Save</button>
       </td>
@@ -103,7 +127,7 @@ function renderSeries() {
 
   if (seriesRows.length === 0) {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="3" style="color:#888;">No series created yet.</td>';
+    tr.innerHTML = '<td colspan="5" style="color:#888;">No series created yet.</td>';
     tbody.appendChild(tr);
   }
 }
@@ -111,16 +135,21 @@ function renderSeries() {
 async function addSeries() {
   const name = document.getElementById('newSeriesName').value.trim();
   const year = document.getElementById('newSeriesYear').value.trim();
+  const race_count = Number(document.getElementById('newRaceCount').value || 0);
+  const day_of_week = document.getElementById('newDayOfWeek').value.trim() || 'Saturday';
+  const start_hour = Number(document.getElementById('newStartHour').value || 11);
+  const start_minute = Number(document.getElementById('newStartMinute').value || 0);
+  const races_per_day = Number(document.getElementById('newRacesPerDay').value || 1);
 
-  if (!name || !year) {
-    alert('Series name and year are required.');
+  if (!name || !year || race_count <= 0 || races_per_day <= 0) {
+    alert('Series name, year, race count and races/day are required.');
     return;
   }
 
   const res = await fetch('/api/series/manage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, year })
+    body: JSON.stringify({ name, year, race_count, day_of_week, start_hour, start_minute, races_per_day })
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) {

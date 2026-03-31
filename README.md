@@ -26,6 +26,31 @@ hamble_admin / ChangeMe123!
 warsash_admin / ChangeMe123!
 hillhead_admin / ChangeMe123!
 
+## Test utility: reset a series for mobile/web testing
+
+Use [\_reset_series_api_test.py](_reset_series_api_test.py) to clear old race data and create fresh upcoming races.
+
+For one-click QA presets on Windows, run [reset_series_test.bat](reset_series_test.bat).
+It provides a menu for default reset, series-only reset, 3-race seed, custom args, and help.
+
+Examples:
+
+- Default reset for `Series_API_Test` (club-wide cleanup):
+   - `C:/Users/SJKnight/virtual_environments/sailing_app/Scripts/python.exe _reset_series_api_test.py`
+- Reset a specific series only:
+   - `C:/Users/SJKnight/virtual_environments/sailing_app/Scripts/python.exe _reset_series_api_test.py --series-name "Series_API_Test" --cleanup-scope series`
+- Create 3 races starting 2 days ahead, 30 minutes apart:
+   - `C:/Users/SJKnight/virtual_environments/sailing_app/Scripts/python.exe _reset_series_api_test.py --race-count 3 --days-ahead 2 --spacing-minutes 30`
+
+Options:
+
+- `--series-name` (default: `Series_API_Test`)
+- `--cleanup-scope` = `club` or `series` (default: `club`)
+- `--race-count` (default: `1`)
+- `--days-ahead` (default: `1`)
+- `--spacing-minutes` (default: `60`)
+- `--db-url` (defaults to `DATABASE_URL` env var, else local postgres URL)
+
 ## 🚀 Frontend improvements (UI/UX)
 
 1. Session fallback

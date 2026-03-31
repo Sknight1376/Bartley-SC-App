@@ -67,6 +67,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 0) Page elements
   const baseUrl = window.location.origin; // static app address base
   const clubId = {{ clubId | tojson }};
+  const raceId = {{ raceId | tojson }};
   const addBtn = document.getElementById('addentry');
   const summaryBtn = document.getElementById('summaryButton');
   const sailorSelect = document.getElementById('Name');
@@ -95,6 +96,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     const tbody = document.querySelector('#entries-table tbody');
     if (!tbody) return;
 
+    const dupe = Array.from(tbody.querySelectorAll('tr')).find(tr =>
+      (tr.dataset.key || '') === String(key || '') &&
+      ((tr.querySelectorAll('td')[2]?.textContent || '').trim() === String(sailNumber || '').trim())
+    );
+    if (dupe) return;
+
     const tr = document.createElement('tr');
     tr.dataset.handicap = handicap; // Store handicap value in dataset
     tr.dataset.key = key; // Store boat key
@@ -107,6 +114,27 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Load existing entries from session on page load
+  async function loadExistingRaceEntries() {
+    if (!raceId) return;
+    try {
+      const res = await fetch(`/api/races/${raceId}/entries`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const existing = data.entries || [];
+      for (const entry of existing) {
+        appendRow({
+          sailor: entry.sailor,
+          boat: entry.boat,
+          sailNumber: entry.sailNumber,
+          handicap: entry.handicap || '',
+          key: entry.key || ''
+        });
+      }
+    } catch (e) {
+      console.error('Error loading race entries:', e);
+    }
+  }
+
   async function loadExistingEntries() {
     try {
       const res = await fetch(`/api/session/attributes`, { cache: 'no-store' });
@@ -196,6 +224,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Load any existing entries when page loads
+  await loadExistingRaceEntries();
   await loadExistingEntries();
 });
 </script>
