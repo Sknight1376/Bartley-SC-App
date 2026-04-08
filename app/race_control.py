@@ -9,6 +9,7 @@ from services.race_control_repository import (
     get_entry_for_race,
     get_lap_count_for_entry,
     get_lap_for_race,
+    list_race_entries,
     get_race_for_club,
     get_race_summary_header,
     get_race_summary_results,
@@ -61,12 +62,34 @@ def web_start_race(
         return {"ok": False, "error": "No entries provided"}, 400
 
     if race_data.get("race_id") and race_data.get("status") == "active":
-        return {
-            "ok": True,
-            "race_id": race_data.get("race_id"),
-            "race_no": race_data.get("race_no"),
-            "entries": race_data.get("entries", []),
-        }, 200
+        # Do not trust stale session entries for an active race. Reload from DB so
+        # clients always receive stable persisted `entry_id` values.
+        try:
+            with db.engine.connect() as conn:
+                race_row = get_race_for_club(conn, race_data.get("race_id"), club_id)
+                if race_row:
+                    persisted = []
+                    for row in list_race_entries(conn, race_data.get("race_id")):
+                        persisted.append(
+                            {
+                                "entry_id": row["entry_id"],
+                                "sailor": row["sailor"],
+                                "boat": row["boat"],
+                                "sailNumber": row["sail_number"],
+                                "handicap": row["handicap"],
+                                "key": row["boatkey"],
+                            }
+                        )
+
+                    return {
+                        "ok": True,
+                        "race_id": race_data.get("race_id"),
+                        "race_no": race_data.get("race_no"),
+                        "entries": persisted,
+                    }, 200
+        except Exception:
+            # Fall through to normal start flow if DB lookup fails unexpectedly.
+            pass
 
     race_id = None
     race_no = None

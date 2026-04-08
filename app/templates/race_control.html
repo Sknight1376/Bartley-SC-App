@@ -162,7 +162,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function getEntryKey(entry, fallbackIndex) {
-    return String(entry.entry_id || entry.key || fallbackIndex);
+    return String(entry.entry_id || entry.session_entry_id || entry.key || fallbackIndex);
   }
 
   async function logTime(entry, elapsedTime, correctedTime, lapNumber, isFinish, position = null) {

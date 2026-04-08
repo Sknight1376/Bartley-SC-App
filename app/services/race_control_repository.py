@@ -162,6 +162,24 @@ def get_entry_for_race(conn, entry_id, race_id):
     ).mappings().first()
 
 
+def list_race_entries(conn, race_id):
+    """Return race entries with stable DB entry keys for control resume flows."""
+    return conn.execute(
+        text('''
+            SELECT re.key AS entry_id,
+                   re.sailor,
+                   re.boat,
+                   re.sail_number,
+                   re.handicap,
+                   re.boatkey
+            FROM "RACINGAPP"."RACE_ENTRY" re
+            WHERE re.race_id = :race_id
+            ORDER BY re.key ASC
+        '''),
+        {"race_id": race_id}
+    ).mappings().all()
+
+
 def get_lap_count_for_entry(conn, entry_id):
     """Return the number of laps recorded for an entry."""
     return conn.execute(

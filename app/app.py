@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, time, date
 import json
 import os
 import logging
+from uuid import uuid4
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -1580,10 +1581,22 @@ def api_entries():
         handicap = (e.get("handicap") or "").strip()
         key = (e.get("key") or "").strip()
         entry_id = e.get("entry_id")
+        session_entry_id = (e.get("session_entry_id") or "").strip()
         if sailor and boat and sailnum:
-            cleaned_entry = {"sailor": sailor, "boat": boat, "sailNumber": sailnum, "handicap": handicap, "key": key}
+            cleaned_entry = {
+                "sailor": sailor,
+                "boat": boat,
+                "sailNumber": sailnum,
+                "handicap": handicap,
+                "key": key,
+                # Stable ID for this browser/session entry before DB persistence.
+                "session_entry_id": session_entry_id or str(uuid4()),
+            }
             if entry_id:
-                cleaned_entry["entry_id"] = entry_id
+                try:
+                    cleaned_entry["entry_id"] = int(entry_id)
+                except (TypeError, ValueError):
+                    pass
             cleaned.append(cleaned_entry)
 
     if not cleaned:
