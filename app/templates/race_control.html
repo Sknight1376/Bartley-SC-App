@@ -54,6 +54,20 @@
     <button id="startRaceBtn" class="blue-button" style="left: 0; right: auto;">Start Race</button>
     <button id="endRaceBtn" class="blue-button" disabled>End Race</button>
   </div>
+
+  <!-- Session fallback modal -->
+  <div id="sessionFallbackModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:9999;">
+    <div style="max-width:480px; margin:12vh auto 0; background:#fff; border-radius:10px; padding:20px 18px; box-shadow:0 14px 32px rgba(0,0,0,0.25);">
+      <h3 style="margin:0 0 10px 0; color:#1331C5;">Unable to load race entries</h3>
+      <p id="sessionFallbackMessage" style="margin:0 0 16px 0; color:#333; line-height:1.35;">
+        We couldn't load your race setup from the session. You can try again or start a new race.
+      </p>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button id="sessionFallbackRetry" class="blue-button" style="position:static; width:auto; min-width:115px;">Try again</button>
+        <button id="sessionFallbackRestart" class="blue-button" style="position:static; width:auto; min-width:140px;">Start new race</button>
+      </div>
+    </div>
+  </div>
 <script>
 
 </script>
@@ -67,6 +81,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   const startRaceBtn = document.getElementById('startRaceBtn');
   const endRaceBtn = document.getElementById('endRaceBtn');
   const raceTableBody = document.querySelector('#race-table tbody');
+  const sessionFallbackModal = document.getElementById('sessionFallbackModal');
+  const sessionFallbackMessage = document.getElementById('sessionFallbackMessage');
+  const sessionFallbackRetry = document.getElementById('sessionFallbackRetry');
+  const sessionFallbackRestart = document.getElementById('sessionFallbackRestart');
 
   // Race state
   let raceStartTime = null;
@@ -82,18 +100,56 @@ document.addEventListener("DOMContentLoaded", async () => {
   let raceId = null;
   let raceNo = null;
 
+  function showSessionFallbackModal(message) {
+    if (sessionFallbackMessage) {
+      sessionFallbackMessage.textContent = message || "We couldn't load your race setup from the session. You can try again or start a new race.";
+    }
+    if (sessionFallbackModal) {
+      sessionFallbackModal.style.display = 'block';
+    }
+  }
+
+  function hideSessionFallbackModal() {
+    if (sessionFallbackModal) {
+      sessionFallbackModal.style.display = 'none';
+    }
+  }
+
+  if (sessionFallbackRetry) {
+    sessionFallbackRetry.addEventListener('click', async () => {
+      hideSessionFallbackModal();
+      await loadEntries();
+    });
+  }
+
+  if (sessionFallbackRestart) {
+    sessionFallbackRestart.addEventListener('click', () => {
+      window.location.href = '/landing';
+    });
+  }
+
   // Load entries from session
   async function loadEntries() {
     try {
       const res = await fetch(`/api/session/attributes`, { cache: 'no-store' });
       if (!res.ok) {
-        alert('No entries found. Please go back to entry summary.');
-        window.location.href = `/entry_summary`;
+        showSessionFallbackModal('No entries were found in your current session. Try reloading, or start a new race.');
         return;
       }
       const data = await res.json();
+      if (!data.ok || !data.attributes) {
+        showSessionFallbackModal(data.error || 'Race setup data is incomplete. Try again, or start a new race.');
+        return;
+      }
       const attributes = data.attributes;
       entries = attributes.entries || [];
+
+      if (!entries.length) {
+        showSessionFallbackModal('No entries are available for race control. Try again, or start a new race.');
+        return;
+      }
+
+      hideSessionFallbackModal();
       clubId = attributes.club_id;
       seriesId = attributes.series_id;
       raceId = attributes.race_id;
@@ -117,7 +173,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderTable();
     } catch (e) {
       console.error('Error loading entries:', e);
-      alert('Error loading entries.');
+      showSessionFallbackModal('Could not reach the server while loading entries. Check the connection and try again.');
     }
   }
 

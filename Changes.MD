@@ -32,7 +32,7 @@ Priority levels:
 - [x] Catch DB disconnects consistently and return JSON errors where appropriate
 
 ### Web — Race Control UI
-- [ ] Add a user-friendly fallback modal when `/api/session/entries` fails, with `Try again` and `Start new race` actions
+- [x] Add a user-friendly fallback modal when `/api/session/entries` fails, with `Try again` and `Start new race` actions
 
 ### Web — Club Dashboard
 - [ ] Build a dedicated retrospective results workflow: create/select race → add/import entries → input finish data → preview standings → approve/publish → immutable audit revisions
