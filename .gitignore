@@ -4,3 +4,15 @@ database.db
 */__pycache__
 __pycache__
 api.log
+
+# Android/Gradle local artifacts
+mobile/sailor-android/.gradle/
+mobile/sailor-android/build/
+mobile/sailor-android/**/build/
+
+# Android local machine config
+mobile/sailor-android/local.properties
+
+# Android IDE artifacts
+mobile/sailor-android/.idea/
+mobile/sailor-android/*.iml

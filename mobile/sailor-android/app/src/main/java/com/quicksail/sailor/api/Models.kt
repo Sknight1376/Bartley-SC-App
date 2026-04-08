@@ -170,7 +170,16 @@ data class RaceControlRace(
 data class RaceControlRacesResponse(
     val ok: Boolean,
     val error: String? = null,
+    val can_race_control: Boolean = false,
     val races: List<RaceControlRace> = emptyList()
+)
+
+data class RaceControlAccessResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val can_race_control: Boolean = false,
+    val is_mobile_admin: Boolean = false,
+    val assigned_race_ids: List<Long> = emptyList()
 )
 
 data class RaceControlEntry(

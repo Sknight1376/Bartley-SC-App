@@ -47,6 +47,10 @@ data class SailorUiState(
     val controlRaceActive: Boolean = false,
     val controlSummaryRace: RaceSummaryRaceInfo? = null,
     val controlSummaryResults: List<RaceSummaryResultRow> = emptyList(),
+    val canRaceControl: Boolean = false,
+    val controlAccessLoaded: Boolean = false,
+    val isMobileAdmin: Boolean = false,
+    val assignedControlRaceIds: List<Long> = emptyList(),
     val dashboardUpcomingRaces: List<UpcomingRace> = emptyList(),
     val dashboardCompletedRaces: List<UpcomingRace> = emptyList(),
     val dashboardLatestDayResults: List<DashboardLatestResult> = emptyList(),
@@ -147,6 +151,7 @@ class SailorViewModel : ViewModel() {
             )
             refreshSeries()
             refreshRaces()
+            loadControlAccess()
             loadControlRaces()
             loadDashboard()
             loadClubSeriesStandings()
@@ -169,6 +174,7 @@ class SailorViewModel : ViewModel() {
                 )
                 refreshSeries()
                 refreshRaces()
+                loadControlAccess()
                 loadControlRaces()
                 loadDashboard()
                 loadClubSeriesStandings()
@@ -213,6 +219,7 @@ class SailorViewModel : ViewModel() {
                     refreshMe()
                     refreshRaces()
                     refreshSeries()
+                    loadControlAccess()
                     loadControlRaces()
                     loadDashboard()
                     loadClubSeriesStandings()
@@ -246,6 +253,7 @@ class SailorViewModel : ViewModel() {
                     refreshMe()
                     refreshRaces()
                     refreshSeries()
+                    loadControlAccess()
                     loadControlRaces()
                     loadDashboard()
                     loadClubSeriesStandings()
@@ -295,6 +303,7 @@ class SailorViewModel : ViewModel() {
                     refreshMe()
                     refreshRaces()
                     refreshSeries()
+                    loadControlAccess()
                     loadControlRaces()
                     loadDashboard()
                     loadClubSeriesStandings()
@@ -486,14 +495,59 @@ class SailorViewModel : ViewModel() {
         runCatching { Network.api.controlUpcomingRaces() }
             .onSuccess {
                 if (it.ok) {
-                    _state.value = _state.value.copy(controlRaces = it.races)
+                    _state.value = _state.value.copy(
+                        canRaceControl = it.can_race_control || it.races.isNotEmpty(),
+                        controlAccessLoaded = true,
+                        controlRaces = it.races
+                    )
                     syncPendingActionsInBackground()
                 } else {
-                    _state.value = _state.value.copy(error = it.error)
+                    _state.value = _state.value.copy(
+                        controlRaces = emptyList(),
+                        canRaceControl = false,
+                        controlAccessLoaded = true,
+                        error = it.error
+                    )
                 }
             }
             .onFailure {
-                _state.value = _state.value.copy(error = it.message)
+                _state.value = _state.value.copy(
+                    controlRaces = emptyList(),
+                    canRaceControl = false,
+                    controlAccessLoaded = true,
+                    error = it.message
+                )
+            }
+    }
+
+    fun loadControlAccess() = viewModelScope.launch {
+        runCatching { Network.api.controlAccess() }
+            .onSuccess {
+                if (it.ok) {
+                    _state.value = _state.value.copy(
+                        canRaceControl = it.can_race_control,
+                        controlAccessLoaded = true,
+                        isMobileAdmin = it.is_mobile_admin,
+                        assignedControlRaceIds = it.assigned_race_ids
+                    )
+                } else {
+                    _state.value = _state.value.copy(
+                        canRaceControl = false,
+                        controlAccessLoaded = true,
+                        isMobileAdmin = false,
+                        assignedControlRaceIds = emptyList(),
+                        error = it.error
+                    )
+                }
+            }
+            .onFailure {
+                _state.value = _state.value.copy(
+                    canRaceControl = false,
+                    controlAccessLoaded = true,
+                    isMobileAdmin = false,
+                    assignedControlRaceIds = emptyList(),
+                    error = it.message
+                )
             }
     }
 

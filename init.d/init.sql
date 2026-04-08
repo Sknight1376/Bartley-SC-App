@@ -127,6 +127,159 @@ ALTER TABLE "RACINGAPP"."RACE_ENTRY"
 ALTER TABLE "RACINGAPP"."LAP"
 	ALTER COLUMN key SET DEFAULT nextval('key');
 
+CREATE TABLE "RACINGAPP"."ROLE"
+(
+	key				bigint NOT NULL PRIMARY KEY,
+	code			varchar(64) NOT NULL UNIQUE,
+	name			varchar(255) NOT NULL,
+	description		text NULL,
+	actor_scope		varchar(32) NOT NULL DEFAULT 'both'
+);
+
+CREATE TABLE "RACINGAPP"."CLUB_USER_ROLE"
+(
+	key				bigint NOT NULL PRIMARY KEY,
+	club_user		bigint NOT NULL REFERENCES "RACINGAPP"."CLUBUSER"(key),
+	club			bigint NOT NULL REFERENCES "RACINGAPP"."CLUBCONTROL"(key),
+	role			bigint NOT NULL REFERENCES "RACINGAPP"."ROLE"(key),
+	granted_by		bigint NULL REFERENCES "RACINGAPP"."CLUBUSER"(key),
+	granted_at		timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	is_active		boolean NOT NULL DEFAULT TRUE,
+	UNIQUE (club_user, club, role)
+);
+
+CREATE TABLE "RACINGAPP"."SAILOR_ROLE_GRANT"
+(
+	key				bigint NOT NULL PRIMARY KEY,
+	sailor_user		bigint NOT NULL REFERENCES "RACINGAPP"."SAILORUSER"(key),
+	sailor			bigint NOT NULL REFERENCES "RACINGAPP"."SAILORCONTROL"(key),
+	club			bigint NULL REFERENCES "RACINGAPP"."CLUBCONTROL"(key),
+	role			bigint NOT NULL REFERENCES "RACINGAPP"."ROLE"(key),
+	valid_from		timestamp NULL,
+	valid_to		timestamp NULL,
+	granted_by		bigint NULL REFERENCES "RACINGAPP"."CLUBUSER"(key),
+	grant_reason		text NULL,
+	is_active		boolean NOT NULL DEFAULT TRUE
+);
+
+CREATE TABLE "RACINGAPP"."RACE_RESULT_REVISION"
+(
+	key				bigint NOT NULL PRIMARY KEY,
+	race_id			bigint NOT NULL REFERENCES "RACINGAPP"."RACE"(key) ON DELETE CASCADE,
+	revision_no		int NOT NULL,
+	status			varchar(32) NOT NULL DEFAULT 'draft',
+	source_mode		varchar(32) NOT NULL DEFAULT 'live',
+	reason			text NULL,
+	created_at		timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	created_by_user		bigint NULL,
+	created_by_type		varchar(32) NULL,
+	based_on_revision_id	bigint NULL REFERENCES "RACINGAPP"."RACE_RESULT_REVISION"(key),
+	snapshot_json		jsonb NULL,
+	UNIQUE (race_id, revision_no)
+);
+
+CREATE TABLE "RACINGAPP"."RACE_DUTY_ASSIGNMENT"
+(
+	key				bigint NOT NULL PRIMARY KEY,
+	race_id			bigint NOT NULL REFERENCES "RACINGAPP"."RACE"(key) ON DELETE CASCADE,
+	sailor			bigint NOT NULL REFERENCES "RACINGAPP"."SAILORCONTROL"(key),
+	sailor_user		bigint NULL REFERENCES "RACINGAPP"."SAILORUSER"(key),
+	role			bigint NOT NULL REFERENCES "RACINGAPP"."ROLE"(key),
+	duty_type		varchar(64) NOT NULL DEFAULT 'race_officer',
+	starts_at		timestamp NULL,
+	ends_at			timestamp NULL,
+	status			varchar(32) NOT NULL DEFAULT 'assigned',
+	assigned_by		bigint NULL REFERENCES "RACINGAPP"."CLUBUSER"(key),
+	notes			text NULL,
+	created_at		timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE (race_id, sailor, role)
+);
+
+CREATE TABLE "RACINGAPP"."RACE_RESULT_AUDIT"
+(
+	key				bigint NOT NULL PRIMARY KEY,
+	race_id			bigint NOT NULL REFERENCES "RACINGAPP"."RACE"(key) ON DELETE CASCADE,
+	revision_id		bigint NULL REFERENCES "RACINGAPP"."RACE_RESULT_REVISION"(key) ON DELETE SET NULL,
+	entity_type		varchar(64) NOT NULL,
+	entity_id		bigint NULL,
+	action			varchar(64) NOT NULL,
+	actor_type		varchar(32) NOT NULL,
+	actor_user_id		bigint NULL,
+	actor_sailor_id		bigint NULL,
+	reason			text NULL,
+	before_json		jsonb NULL,
+	after_json		jsonb NULL,
+	created_at		timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE "RACINGAPP"."RACE"
+	ADD COLUMN results_status varchar(32) NOT NULL DEFAULT 'draft';
+
+ALTER TABLE "RACINGAPP"."RACE"
+	ADD COLUMN results_locked_at timestamp NULL;
+
+ALTER TABLE "RACINGAPP"."RACE"
+	ADD COLUMN results_locked_by bigint NULL REFERENCES "RACINGAPP"."CLUBUSER"(key);
+
+ALTER TABLE "RACINGAPP"."RACE"
+	ADD COLUMN source_mode varchar(32) NOT NULL DEFAULT 'live';
+
+ALTER TABLE "RACINGAPP"."RACE_ENTRY"
+	ADD COLUMN created_by_user bigint NULL;
+
+ALTER TABLE "RACINGAPP"."RACE_ENTRY"
+	ADD COLUMN created_by_type varchar(32) NULL;
+
+ALTER TABLE "RACINGAPP"."RACE_ENTRY"
+	ADD COLUMN source varchar(32) NULL;
+
+ALTER TABLE "RACINGAPP"."RACE_ENTRY"
+	ADD COLUMN revision_id bigint NULL REFERENCES "RACINGAPP"."RACE_RESULT_REVISION"(key);
+
+ALTER TABLE "RACINGAPP"."LAP"
+	ADD COLUMN created_by_user bigint NULL;
+
+ALTER TABLE "RACINGAPP"."LAP"
+	ADD COLUMN created_by_type varchar(32) NULL;
+
+ALTER TABLE "RACINGAPP"."LAP"
+	ADD COLUMN source varchar(32) NULL;
+
+ALTER TABLE "RACINGAPP"."LAP"
+	ADD COLUMN revision_id bigint NULL REFERENCES "RACINGAPP"."RACE_RESULT_REVISION"(key);
+
+ALTER TABLE "RACINGAPP"."ROLE"
+	ALTER COLUMN key SET DEFAULT nextval('key');
+
+ALTER TABLE "RACINGAPP"."CLUB_USER_ROLE"
+	ALTER COLUMN key SET DEFAULT nextval('key');
+
+ALTER TABLE "RACINGAPP"."SAILOR_ROLE_GRANT"
+	ALTER COLUMN key SET DEFAULT nextval('key');
+
+ALTER TABLE "RACINGAPP"."RACE_RESULT_REVISION"
+	ALTER COLUMN key SET DEFAULT nextval('key');
+
+ALTER TABLE "RACINGAPP"."RACE_DUTY_ASSIGNMENT"
+	ALTER COLUMN key SET DEFAULT nextval('key');
+
+ALTER TABLE "RACINGAPP"."RACE_RESULT_AUDIT"
+	ALTER COLUMN key SET DEFAULT nextval('key');
+
+INSERT INTO "RACINGAPP"."ROLE" (key, code, name, description, actor_scope)
+VALUES
+	(nextval('key'), 'club_admin', 'Club Admin', 'Full club administration and result approval rights', 'club_user'),
+	(nextval('key'), 'race_officer', 'Race Officer', 'Operational race control access for assigned races', 'both'),
+	(nextval('key'), 'sailor', 'Sailor', 'Standard sailor application access', 'sailor_user');
+
+CREATE INDEX idx_club_user_role_club ON "RACINGAPP"."CLUB_USER_ROLE" (club);
+CREATE INDEX idx_sailor_role_grant_sailor ON "RACINGAPP"."SAILOR_ROLE_GRANT" (sailor);
+CREATE INDEX idx_sailor_role_grant_role ON "RACINGAPP"."SAILOR_ROLE_GRANT" (role);
+CREATE INDEX idx_race_duty_assignment_race ON "RACINGAPP"."RACE_DUTY_ASSIGNMENT" (race_id);
+CREATE INDEX idx_race_duty_assignment_sailor ON "RACINGAPP"."RACE_DUTY_ASSIGNMENT" (sailor);
+CREATE INDEX idx_race_result_audit_race ON "RACINGAPP"."RACE_RESULT_AUDIT" (race_id);
+CREATE INDEX idx_race_result_revision_race ON "RACINGAPP"."RACE_RESULT_REVISION" (race_id);
+
 
 ALTER TABLE "RACINGAPP"."CLUBCONTROL"
   ALTER COLUMN "key" ADD GENERATED BY DEFAULT AS IDENTITY;

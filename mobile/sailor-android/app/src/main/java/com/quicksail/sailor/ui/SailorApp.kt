@@ -493,6 +493,13 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
     LaunchedEffect(state.login?.sailor_id) {
         vm.loadDashboard()
         vm.loadClubSeriesStandings()
+        vm.loadControlAccess()
+    }
+
+    LaunchedEffect(state.canRaceControl, homePage) {
+        if (!state.canRaceControl && homePage == HomePage.RACE_CONTROL) {
+            homePage = HomePage.DASHBOARD
+        }
     }
 
     LaunchedEffect(refreshing) {
@@ -525,6 +532,7 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                 }
                 HomePage.SERIES_RESULTS -> vm.loadClubSeriesStandings()
                 HomePage.RACE_CONTROL -> {
+                    vm.loadControlAccess()
                     vm.loadControlRaces()
                     state.selectedControlRaceId?.let { vm.loadControlEntries(it) }
                 }
@@ -533,11 +541,15 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
     )
 
     val onPageSelected: (HomePage) -> Unit = { page ->
-        homePage = page
-        when (page) {
-            HomePage.DASHBOARD -> vm.loadDashboard()
-            HomePage.SERIES_RESULTS -> vm.loadClubSeriesStandings()
-            HomePage.PROFILE, HomePage.RACE_CONTROL -> Unit
+        if (page == HomePage.RACE_CONTROL && !state.canRaceControl) {
+            vm.loadControlAccess()
+        } else {
+            homePage = page
+            when (page) {
+                HomePage.DASHBOARD -> vm.loadDashboard()
+                HomePage.SERIES_RESULTS -> vm.loadClubSeriesStandings()
+                HomePage.PROFILE, HomePage.RACE_CONTROL -> Unit
+            }
         }
     }
 
@@ -550,6 +562,7 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                     NavigationBarItem(
                         selected = homePage == page,
                         onClick = { onPageSelected(page) },
+                        enabled = page != HomePage.RACE_CONTROL || state.canRaceControl,
                         icon = {},
                         label = {
                             Text(
@@ -687,7 +700,16 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                         )
                     }
                     HomePage.SERIES_RESULTS -> SeriesResultsPage(state, vm)
-                    HomePage.RACE_CONTROL -> RaceControlSection(state, vm)
+                    HomePage.RACE_CONTROL -> {
+                        if (state.canRaceControl) {
+                            RaceControlSection(state, vm)
+                        } else {
+                            RaceControlDisabledSection(
+                                accessLoaded = state.controlAccessLoaded,
+                                onRefreshAccess = { vm.loadControlAccess() }
+                            )
+                        }
+                    }
                 }
             }
 
@@ -713,6 +735,35 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                         }
                     }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RaceControlDisabledSection(
+    accessLoaded: Boolean,
+    onRefreshAccess: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+            .padding(12.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Race Control", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            Text(
+                if (accessLoaded) {
+                    "Race control is available only when you have an active duty assignment (or club admin grant)."
+                } else {
+                    "Checking your race-control access…"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            TextButton(onClick = onRefreshAccess, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text("Refresh access")
             }
         }
     }

@@ -2,6 +2,48 @@ from flask import Flask, render_template, jsonify, request, session, redirect
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from datetime import datetime, timedelta, time, date
+import json
+
+from services.permissions import (
+    club_user_has_role as permission_club_user_has_role,
+    sailor_has_active_role as permission_sailor_has_active_role,
+    sailor_has_race_duty as permission_sailor_has_race_duty,
+    sailor_can_access_race_control as permission_sailor_can_access_race_control,
+)
+from admin_api import (
+    decide_handicap_recommendation,
+    get_race_audit,
+    get_race_revisions,
+    health_check,
+)
+from mobile_api import build_control_access_response
+from series_management import list_series_rules, create_series_rule
+from race_control import (
+    add_race_entry,
+    delete_race_lap,
+    edit_race_lap,
+    lock_results,
+    mobile_control_finish,
+    mobile_control_lap,
+    mobile_control_start,
+    remove_race_entry,
+    unlock_results,
+    web_finish_race,
+    web_record_lap,
+)
+from retrospective import (
+    create_retrospective_race,
+    list_retrospective_races,
+    preview_retrospective_results,
+    publish_race_results,
+    save_retrospective_draft,
+)
+from duties import (
+    assign_race_duty,
+    assign_race_duty_by_date,
+    delete_race_duty,
+    list_race_duties,
+)
 
 
 
@@ -63,6 +105,501 @@ def set_mobile_session(sailor_user_id, sailor_id, username, club_id):
         session.pop("sailor_club_id", None)
     else:
         session["sailor_club_id"] = str(club_id)
+
+
+def grant_club_role(conn, club_user_id, club_id, role_code, granted_by=None):
+    role_id = conn.execute(
+        text('SELECT key FROM "RACINGAPP"."ROLE" WHERE code = :code LIMIT 1'),
+        {"code": role_code}
+    ).scalar()
+    if not role_id:
+        return
+
+    conn.execute(
+        text('''
+            INSERT INTO "RACINGAPP"."CLUB_USER_ROLE" (key, club_user, club, role, granted_by, is_active)
+            VALUES (nextval('key'), :club_user, :club, :role, :granted_by, TRUE)
+            ON CONFLICT (club_user, club, role)
+            DO UPDATE SET is_active = TRUE,
+                          granted_by = COALESCE(EXCLUDED.granted_by, "RACINGAPP"."CLUB_USER_ROLE".granted_by),
+                          granted_at = CURRENT_TIMESTAMP
+        '''),
+        {
+            "club_user": club_user_id,
+            "club": club_id,
+            "role": role_id,
+            "granted_by": granted_by,
+        }
+    )
+
+
+def grant_sailor_role(conn, sailor_user_id, sailor_id, club_id, role_code, granted_by=None, grant_reason=None):
+    role_id = conn.execute(
+        text('SELECT key FROM "RACINGAPP"."ROLE" WHERE code = :code LIMIT 1'),
+        {"code": role_code}
+    ).scalar()
+    if not role_id:
+        return
+
+    existing = conn.execute(
+        text('''
+            SELECT key
+            FROM "RACINGAPP"."SAILOR_ROLE_GRANT"
+            WHERE sailor_user = :sailor_user
+              AND sailor = :sailor
+              AND role = :role
+              AND COALESCE(club, -1) = COALESCE(:club, -1)
+            LIMIT 1
+        '''),
+        {
+            "sailor_user": sailor_user_id,
+            "sailor": sailor_id,
+            "role": role_id,
+            "club": club_id,
+        }
+    ).scalar()
+    if existing:
+        conn.execute(
+            text('''
+                UPDATE "RACINGAPP"."SAILOR_ROLE_GRANT"
+                SET is_active = TRUE
+                WHERE key = :grant_id
+            '''),
+            {"grant_id": existing}
+        )
+        return
+
+    conn.execute(
+        text('''
+            INSERT INTO "RACINGAPP"."SAILOR_ROLE_GRANT" (
+                key, sailor_user, sailor, club, role, granted_by, grant_reason, is_active
+            )
+            VALUES (nextval('key'), :sailor_user, :sailor, :club, :role, :granted_by, :grant_reason, TRUE)
+        '''),
+        {
+            "sailor_user": sailor_user_id,
+            "sailor": sailor_id,
+            "club": club_id,
+            "role": role_id,
+            "granted_by": granted_by,
+            "grant_reason": grant_reason,
+        }
+    )
+
+
+def club_user_has_role(conn, club_user_id, club_id, role_codes):
+    return permission_club_user_has_role(conn, club_user_id, club_id, role_codes)
+
+
+def sailor_has_active_role(conn, sailor_user_id, sailor_id, club_id, role_codes, when_dt=None):
+    return permission_sailor_has_active_role(conn, sailor_user_id, sailor_id, club_id, role_codes, when_dt)
+
+
+def sailor_has_race_duty(conn, sailor_user_id, sailor_id, race_id, role_code="race_officer", when_dt=None):
+    return permission_sailor_has_race_duty(conn, sailor_user_id, sailor_id, race_id, role_code, when_dt)
+
+
+def sailor_can_access_race_control(conn, sailor_user_id, sailor_id, club_id, race_id=None):
+    return permission_sailor_can_access_race_control(conn, sailor_user_id, sailor_id, club_id, race_id)
+
+
+def require_club_admin(club_id=None, redirect_to_login=False):
+    user_id = session.get("user_id")
+    effective_club_id = club_id or session.get("club_id")
+
+    if not user_id or not effective_club_id:
+        return redirect("/login") if redirect_to_login else (jsonify({"ok": False, "error": "Unauthorized"}), 401)
+
+    try:
+        with db.engine.connect() as conn:
+            allowed = club_user_has_role(conn, user_id, effective_club_id, "club_admin")
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    if not allowed:
+        return redirect("/login") if redirect_to_login else (jsonify({"ok": False, "error": "Forbidden"}), 403)
+
+    return None
+
+
+def require_club_admin_or_race_officer(club_id=None, redirect_to_login=False):
+    user_id = session.get("user_id")
+    effective_club_id = club_id or session.get("club_id")
+
+    if not user_id or not effective_club_id:
+        return redirect("/login") if redirect_to_login else (jsonify({"ok": False, "error": "Unauthorized"}), 401)
+
+    try:
+        with db.engine.connect() as conn:
+            allowed = club_user_has_role(conn, user_id, effective_club_id, ["club_admin", "race_officer"])
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    if not allowed:
+        return redirect("/login") if redirect_to_login else (jsonify({"ok": False, "error": "Forbidden"}), 403)
+
+    return None
+
+
+def require_mobile_race_control_access(race_id=None):
+    sailor_user_id = session.get("sailor_user_id")
+    sailor_id = session.get("sailor_id")
+    club_id = session.get("sailor_club_id")
+
+    if not sailor_user_id or not sailor_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.begin() as conn:
+            if not club_id:
+                club_id = conn.execute(
+                    text('''
+                        SELECT club
+                        FROM "RACINGAPP"."SAILORCONTROL"
+                        WHERE key = :sailor_id
+                        LIMIT 1
+                    '''),
+                    {"sailor_id": sailor_id}
+                ).scalar()
+                if club_id:
+                    session["sailor_club_id"] = str(club_id)
+
+            if not club_id:
+                return jsonify({"ok": False, "error": "No club assigned for sailor"}), 403
+
+            allowed = sailor_can_access_race_control(conn, sailor_user_id, sailor_id, club_id, race_id)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    if not allowed:
+        return jsonify({"ok": False, "error": "Forbidden"}), 403
+
+    return None
+
+
+def get_actor_context(mobile=False):
+    if mobile:
+        sailor_user_id = session.get("sailor_user_id")
+        sailor_id = session.get("sailor_id")
+        return {
+            "actor_type": "sailor_user",
+            "actor_user_id": int(sailor_user_id) if sailor_user_id not in (None, "", "null") else None,
+            "actor_sailor_id": int(sailor_id) if sailor_id not in (None, "", "null") else None,
+            "created_by_type": "sailor_user",
+            "created_by_user": int(sailor_user_id) if sailor_user_id not in (None, "", "null") else None,
+        }
+
+    user_id = session.get("user_id")
+    return {
+        "actor_type": "club_user",
+        "actor_user_id": int(user_id) if user_id not in (None, "", "null") else None,
+        "actor_sailor_id": None,
+        "created_by_type": "club_user",
+        "created_by_user": int(user_id) if user_id not in (None, "", "null") else None,
+    }
+
+
+def race_is_locked(race_row):
+    if not race_row:
+        return False
+    return race_row.get("results_status") == "locked" or race_row.get("results_locked_at") is not None
+
+
+def get_race_state(conn, race_id, club_id=None):
+    return conn.execute(
+        text('''
+            SELECT key, club, series, status, results_status, results_locked_at, source_mode
+            FROM "RACINGAPP"."RACE"
+            WHERE key = :race_id
+              AND (:club_id IS NULL OR club = :club_id)
+            LIMIT 1
+        '''),
+        {
+            "race_id": race_id,
+            "club_id": int(club_id) if club_id not in (None, "", "null") else None,
+        }
+    ).mappings().first()
+
+
+def _json_safe(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, time):
+        return value.isoformat()
+    return value
+
+
+def build_race_snapshot(conn, race_id):
+    race_row = conn.execute(
+        text('''
+            SELECT key,
+                   club,
+                   series,
+                   race_no,
+                   status,
+                   results_status,
+                   source_mode,
+                   started_at,
+                   ended_at,
+                   results_locked_at,
+                   results_locked_by
+            FROM "RACINGAPP"."RACE"
+            WHERE key = :race_id
+            LIMIT 1
+        '''),
+        {"race_id": race_id}
+    ).mappings().first()
+
+    entries = conn.execute(
+        text('''
+            SELECT re.key,
+                   re.race_id,
+                   re.boatkey,
+                   re.sailor,
+                   re.boat,
+                   re.sail_number,
+                   re.handicap,
+                   re.created_by_user,
+                   re.created_by_type,
+                   re.source,
+                   re.revision_id
+            FROM "RACINGAPP"."RACE_ENTRY" re
+            WHERE re.race_id = :race_id
+            ORDER BY re.key
+        '''),
+        {"race_id": race_id}
+    ).mappings().all()
+
+    laps = conn.execute(
+        text('''
+            SELECT l.key,
+                   l.race_entry_id,
+                   l.lap_number,
+                   l.is_finish,
+                   l.elapsed_sec,
+                   l.corrected_sec,
+                   l.position,
+                   l.created_by_user,
+                   l.created_by_type,
+                   l.source,
+                   l.revision_id
+            FROM "RACINGAPP"."LAP" l
+            JOIN "RACINGAPP"."RACE_ENTRY" re ON re.key = l.race_entry_id
+            WHERE re.race_id = :race_id
+            ORDER BY l.key
+        '''),
+        {"race_id": race_id}
+    ).mappings().all()
+
+    return {
+        "race": {k: _json_safe(v) for k, v in (dict(race_row) if race_row else {}).items()},
+        "entries": [{k: _json_safe(v) for k, v in dict(row).items()} for row in entries],
+        "laps": [{k: _json_safe(v) for k, v in dict(row).items()} for row in laps],
+    }
+
+
+def create_race_revision(conn, race_id, actor, reason=None, status="draft", source_mode="live"):
+    based_on_revision_id = conn.execute(
+        text('''
+            SELECT key
+            FROM "RACINGAPP"."RACE_RESULT_REVISION"
+            WHERE race_id = :race_id
+            ORDER BY revision_no DESC
+            LIMIT 1
+        '''),
+        {"race_id": race_id}
+    ).scalar()
+
+    next_revision_no = conn.execute(
+        text('''
+            SELECT COALESCE(MAX(revision_no), 0) + 1
+            FROM "RACINGAPP"."RACE_RESULT_REVISION"
+            WHERE race_id = :race_id
+        '''),
+        {"race_id": race_id}
+    ).scalar()
+
+    snapshot_json = json.dumps(build_race_snapshot(conn, race_id))
+
+    revision_id = conn.execute(
+        text('''
+            INSERT INTO "RACINGAPP"."RACE_RESULT_REVISION" (
+                key,
+                race_id,
+                revision_no,
+                status,
+                source_mode,
+                reason,
+                created_by_user,
+                created_by_type,
+                based_on_revision_id,
+                snapshot_json
+            )
+            VALUES (
+                nextval('key'),
+                :race_id,
+                :revision_no,
+                :status,
+                :source_mode,
+                :reason,
+                :created_by_user,
+                :created_by_type,
+                :based_on_revision_id,
+                CAST(:snapshot_json AS JSONB)
+            )
+            RETURNING key
+        '''),
+        {
+            "race_id": race_id,
+            "revision_no": next_revision_no,
+            "status": status,
+            "source_mode": source_mode,
+            "reason": reason,
+            "created_by_user": actor.get("created_by_user"),
+            "created_by_type": actor.get("created_by_type"),
+            "based_on_revision_id": based_on_revision_id,
+            "snapshot_json": snapshot_json,
+        }
+    ).scalar()
+    return revision_id
+
+
+def resolve_role_id(conn, role_code):
+    return conn.execute(
+        text('SELECT key FROM "RACINGAPP"."ROLE" WHERE code = :code LIMIT 1'),
+        {"code": role_code}
+    ).scalar()
+
+
+def upsert_race_duty_assignment(
+    conn,
+    race_id,
+    sailor_id,
+    sailor_user_id,
+    role_id,
+    duty_type,
+    starts_at,
+    ends_at,
+    status,
+    assigned_by,
+    notes,
+):
+    return conn.execute(
+        text('''
+            INSERT INTO "RACINGAPP"."RACE_DUTY_ASSIGNMENT" (
+                key,
+                race_id,
+                sailor,
+                sailor_user,
+                role,
+                duty_type,
+                starts_at,
+                ends_at,
+                status,
+                assigned_by,
+                notes
+            )
+            VALUES (
+                nextval('key'),
+                :race_id,
+                :sailor,
+                :sailor_user,
+                :role,
+                :duty_type,
+                :starts_at,
+                :ends_at,
+                :status,
+                :assigned_by,
+                :notes
+            )
+            ON CONFLICT (race_id, sailor, role)
+            DO UPDATE SET
+                sailor_user = EXCLUDED.sailor_user,
+                duty_type = EXCLUDED.duty_type,
+                starts_at = EXCLUDED.starts_at,
+                ends_at = EXCLUDED.ends_at,
+                status = EXCLUDED.status,
+                assigned_by = EXCLUDED.assigned_by,
+                notes = EXCLUDED.notes
+            RETURNING key
+        '''),
+        {
+            "race_id": race_id,
+            "sailor": sailor_id,
+            "sailor_user": sailor_user_id,
+            "role": role_id,
+            "duty_type": duty_type,
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+            "status": status,
+            "assigned_by": assigned_by,
+            "notes": notes,
+        }
+    ).scalar()
+
+
+def write_race_audit(
+    conn,
+    race_id,
+    actor,
+    entity_type,
+    action,
+    entity_id=None,
+    reason=None,
+    before_obj=None,
+    after_obj=None,
+    revision_id=None,
+):
+    before_json = json.dumps(before_obj) if before_obj is not None else None
+    after_json = json.dumps(after_obj) if after_obj is not None else None
+
+    conn.execute(
+        text('''
+            INSERT INTO "RACINGAPP"."RACE_RESULT_AUDIT" (
+                key,
+                race_id,
+                revision_id,
+                entity_type,
+                entity_id,
+                action,
+                actor_type,
+                actor_user_id,
+                actor_sailor_id,
+                reason,
+                before_json,
+                after_json
+            )
+            VALUES (
+                nextval('key'),
+                :race_id,
+                :revision_id,
+                :entity_type,
+                :entity_id,
+                :action,
+                :actor_type,
+                :actor_user_id,
+                :actor_sailor_id,
+                :reason,
+                CAST(:before_json AS JSONB),
+                CAST(:after_json AS JSONB)
+            )
+        '''),
+        {
+            "race_id": race_id,
+            "revision_id": revision_id,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "action": action,
+            "actor_type": actor.get("actor_type") or "unknown",
+            "actor_user_id": actor.get("actor_user_id"),
+            "actor_sailor_id": actor.get("actor_sailor_id"),
+            "reason": reason,
+            "before_json": before_json,
+            "after_json": after_json,
+        }
+    )
 
 
 def ensure_series_schedule_tables(conn):
@@ -442,12 +979,8 @@ def intro_page():
 @app.get("/api/health")
 @app.get("/api/mobile/health")
 def api_health():
-    try:
-        with db.engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return jsonify({"ok": True, "status": "healthy"})
-    except Exception as e:
-        return jsonify({"ok": False, "status": "unhealthy", "error": str(e)}), 500
+    payload, status = health_check(db)
+    return jsonify(payload), status
 
 
 @app.get("/login")
@@ -490,6 +1023,7 @@ def api_login():
                     text('UPDATE "RACINGAPP"."CLUBUSER" SET last_login = CURRENT_TIMESTAMP WHERE key = :user_id'),
                     {"user_id": user_row["user_id"]}
                 )
+                grant_club_role(conn, user_row["user_id"], user_row["club_id"], "club_admin", user_row["user_id"])
                 conn.commit()
 
         if not user_row:
@@ -562,6 +1096,13 @@ def api_mobile_login():
             conn.execute(
                 text('UPDATE "RACINGAPP"."SAILORUSER" SET last_login = CURRENT_TIMESTAMP WHERE key = :user_id'),
                 {"user_id": sailor_user["sailor_user_id"]}
+            )
+            grant_sailor_role(
+                conn,
+                sailor_user["sailor_user_id"],
+                sailor_user["sailor_id"],
+                sailor_user["club"],
+                "sailor"
             )
 
         set_mobile_session(
@@ -646,6 +1187,15 @@ def api_mobile_register():
                     "password": password
                 }
             ).scalar_one()
+
+            grant_sailor_role(
+                conn,
+                sailor_user_id,
+                sailor_id,
+                resolved_club_id,
+                "sailor",
+                grant_reason="Initial sailor registration"
+            )
 
         set_mobile_session(sailor_user_id, sailor_id, username, resolved_club_id)
 
@@ -1475,9 +2025,10 @@ def api_mobile_race_results(race_id):
 
 @app.get("/api/mobile/races/control/upcoming")
 def api_mobile_control_upcoming_races():
+    sailor_user_id = session.get("sailor_user_id")
     club_id = session.get("sailor_club_id")
     sailor_id = session.get("sailor_id")
-    if not sailor_id:
+    if not sailor_user_id or not sailor_id:
         return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
@@ -1498,10 +2049,17 @@ def api_mobile_control_upcoming_races():
             if not club_id:
                 return jsonify({"ok": True, "races": []})
 
-            rows = conn.execute(
-                text('''
-                    SELECT race_id, series_id, race_no, started_at, status, series_name
-                    FROM (
+            is_mobile_admin = sailor_has_active_role(
+                conn,
+                sailor_user_id,
+                sailor_id,
+                club_id,
+                "club_admin"
+            )
+
+            if is_mobile_admin:
+                rows = conn.execute(
+                    text('''
                         SELECT r.key AS race_id,
                                r.series AS series_id,
                                r.race_no,
@@ -1512,26 +2070,63 @@ def api_mobile_control_upcoming_races():
                         JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
                         WHERE r.club = :club_id
                           AND r.status IN ('not_started', 'active')
-                    ) x
-                    ORDER BY
-                        CASE WHEN status = 'active' THEN 0 ELSE 1 END,
-                        started_at ASC NULLS LAST,
-                        race_id ASC
-                '''),
-                {"club_id": club_id}
-            ).mappings().all()
+                        ORDER BY
+                            CASE WHEN r.status = 'active' THEN 0 ELSE 1 END,
+                            r.started_at ASC NULLS LAST,
+                            r.key ASC
+                    '''),
+                    {"club_id": club_id}
+                ).mappings().all()
+            else:
+                rows = conn.execute(
+                    text('''
+                        SELECT r.key AS race_id,
+                               r.series AS series_id,
+                               r.race_no,
+                               r.started_at,
+                               r.status,
+                               sc.name AS series_name
+                        FROM "RACINGAPP"."RACE" r
+                        JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+                        WHERE r.club = :club_id
+                          AND r.status IN ('not_started', 'active')
+                          AND EXISTS (
+                              SELECT 1
+                              FROM "RACINGAPP"."RACE_DUTY_ASSIGNMENT" rda
+                              JOIN "RACINGAPP"."ROLE" rr ON rr.key = rda.role
+                              WHERE rda.race_id = r.key
+                                AND rda.sailor = :sailor_id
+                                AND rda.status = 'assigned'
+                                AND rr.code = 'race_officer'
+                                AND (rda.starts_at IS NULL OR rda.starts_at <= CURRENT_TIMESTAMP)
+                                AND (rda.ends_at IS NULL OR rda.ends_at >= CURRENT_TIMESTAMP)
+                          )
+                        ORDER BY
+                            CASE WHEN r.status = 'active' THEN 0 ELSE 1 END,
+                            r.started_at ASC NULLS LAST,
+                            r.key ASC
+                    '''),
+                    {"club_id": club_id, "sailor_id": sailor_id}
+                ).mappings().all()
 
-        return jsonify({"ok": True, "races": [dict(r) for r in rows]})
+        return jsonify({"ok": True, "races": [dict(r) for r in rows], "can_race_control": bool(is_mobile_admin or rows)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.get("/api/mobile/races/control/access")
+def api_mobile_control_access():
+    payload, status = build_control_access_response(db, session, sailor_has_active_role)
+    return jsonify(payload), status
+
+
 @app.get("/api/mobile/races/<int:race_id>/control-entries")
 def api_mobile_control_entries(race_id):
+    guard = require_mobile_race_control_access(race_id)
+    if guard is not None:
+        return guard
+
     club_id = session.get("sailor_club_id")
-    sailor_id = session.get("sailor_id")
-    if not sailor_id or not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
         with db.engine.connect() as conn:
@@ -1579,135 +2174,69 @@ def api_mobile_control_entries(race_id):
 
 @app.post("/api/mobile/races/<int:race_id>/control-start")
 def api_mobile_control_start(race_id):
-    club_id = session.get("sailor_club_id")
-    sailor_id = session.get("sailor_id")
-    if not sailor_id or not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    guard = require_mobile_race_control_access(race_id)
+    if guard is not None:
+        return guard
 
-    try:
-        with db.engine.begin() as conn:
-            race_row = conn.execute(
-                text('''
-                    SELECT key, status
-                    FROM "RACINGAPP"."RACE"
-                    WHERE key = :race_id
-                      AND club = :club_id
-                    LIMIT 1
-                '''),
-                {"race_id": race_id, "club_id": club_id}
-            ).mappings().first()
-
-            if not race_row:
-                return jsonify({"ok": False, "error": "Race not found"}), 404
-            if race_row["status"] == "finished":
-                return jsonify({"ok": False, "error": "Race already finished"}), 409
-
-            conn.execute(
-                text('''
-                    UPDATE "RACINGAPP"."RACE"
-                    SET status = 'active',
-                        started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
-                    WHERE key = :race_id
-                '''),
-                {"race_id": race_id}
-            )
-
-        return jsonify({"ok": True, "race_id": race_id})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = mobile_control_start(
+        db,
+        race_id,
+        session.get("sailor_club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=True),
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
 
 
 @app.post("/api/mobile/races/<int:race_id>/control-lap")
 def api_mobile_control_lap(race_id):
-    club_id = session.get("sailor_club_id")
-    sailor_id = session.get("sailor_id")
-    if not sailor_id or not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    guard = require_mobile_race_control_access(race_id)
+    if guard is not None:
+        return guard
 
-    payload = request.get_json(silent=True) or {}
-    entry_id = payload.get("entry_id")
-    lap_number = payload.get("lap_number")
-    elapsed_time = payload.get("elapsed_time")
-    corrected_time = payload.get("corrected_time")
-    position = payload.get("position")
-    is_finish = bool(payload.get("is_finish", False))
-
-    if not all([entry_id, lap_number, elapsed_time]):
-        return jsonify({"ok": False, "error": "Missing required lap fields"}), 400
-
-    try:
-        elapsed_sec = parse_hms_to_seconds(elapsed_time)
-        corrected_sec = parse_hms_to_seconds(corrected_time) if corrected_time and corrected_time != "N/A" else None
-
-        with db.engine.begin() as conn:
-            race_exists = conn.execute(
-                text('SELECT 1 FROM "RACINGAPP"."RACE" WHERE key = :race_id AND club = :club_id'),
-                {"race_id": race_id, "club_id": club_id}
-            ).scalar()
-            if not race_exists:
-                return jsonify({"ok": False, "error": "Race not found"}), 404
-
-            entry_exists = conn.execute(
-                text('SELECT 1 FROM "RACINGAPP"."RACE_ENTRY" WHERE key = :entry_id AND race_id = :race_id'),
-                {"entry_id": entry_id, "race_id": race_id}
-            ).scalar()
-            if not entry_exists:
-                return jsonify({"ok": False, "error": "Race entry not found"}), 404
-
-            conn.execute(
-                text('''
-                    INSERT INTO "RACINGAPP"."LAP" (race_entry_id, lap_number, is_finish, elapsed_sec, corrected_sec, position)
-                    VALUES (:race_entry_id, :lap_number, :is_finish, :elapsed_sec, :corrected_sec, :position)
-                '''),
-                {
-                    "race_entry_id": entry_id,
-                    "lap_number": lap_number,
-                    "is_finish": is_finish,
-                    "elapsed_sec": elapsed_sec,
-                    "corrected_sec": corrected_sec,
-                    "position": position
-                }
-            )
-
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = mobile_control_lap(
+        db,
+        race_id,
+        session.get("sailor_club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=True),
+        parse_hms_to_seconds,
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
 
 
 @app.post("/api/mobile/races/<int:race_id>/control-finish")
 def api_mobile_control_finish(race_id):
-    club_id = session.get("sailor_club_id")
-    sailor_id = session.get("sailor_id")
-    if not sailor_id or not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    guard = require_mobile_race_control_access(race_id)
+    if guard is not None:
+        return guard
 
-    try:
-        with db.engine.begin() as conn:
-            updated = conn.execute(
-                text('''
-                    UPDATE "RACINGAPP"."RACE"
-                    SET status = :status,
-                        ended_at = CURRENT_TIMESTAMP
-                    WHERE key = :race_id
-                      AND club = :club_id
-                '''),
-                {"status": "finished", "race_id": race_id, "club_id": club_id}
-            )
-
-        if updated.rowcount == 0:
-            return jsonify({"ok": False, "error": "Race not found"}), 404
-
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = mobile_control_finish(
+        db,
+        race_id,
+        session.get("sailor_club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=True),
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
 
 
 @app.get("/api/mobile/races/<int:race_id>/control-summary")
 def api_mobile_control_summary(race_id):
+    guard = require_mobile_race_control_access(race_id)
+    if guard is not None:
+        return guard
+
     club_id = session.get("sailor_club_id")
-    sailor_id = session.get("sailor_id")
-    if not sailor_id or not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
         with db.engine.connect() as conn:
@@ -1854,9 +2383,11 @@ def api_get_members():
 
 @app.post("/api/members")
 def api_create_member():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
     first_name = (payload.get("first_name") or "").strip()
@@ -1890,9 +2421,11 @@ def api_create_member():
 
 @app.put("/api/members/<int:member_id>")
 def api_update_member(member_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
     first_name = (payload.get("first_name") or "").strip()
@@ -1932,8 +2465,9 @@ def api_update_member(member_id):
 
 @app.get("/api/boats/catalog")
 def api_boat_catalog():
-    if not session.get("club_id"):
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
 
     try:
         with db.engine.connect() as conn:
@@ -1956,9 +2490,11 @@ def api_boat_catalog():
 
 @app.post("/api/members/<int:member_id>/boats")
 def api_assign_boat(member_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
     handicap_key = payload.get("handicap_key")
@@ -1992,8 +2528,9 @@ def api_assign_boat(member_id):
 
 @app.get("/series")
 def series_page():
-    if not session.get("club_id"):
-        return redirect("/login")
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
     return render_template("series.html", clubName=session.get("club_name"))
 
 
@@ -2013,15 +2550,17 @@ def get_active_series_setup_id():
 
 @app.get("/series/new")
 def series_new_page():
-    if not session.get("club_id"):
-        return redirect("/login")
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
     return redirect("/series/new/start")
 
 
 @app.get("/series/new/start")
 def series_new_start_page():
-    if not session.get("club_id"):
-        return redirect("/login")
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
     return render_template(
         "series_new_start.html",
         clubName=session.get("club_name"),
@@ -2031,8 +2570,9 @@ def series_new_start_page():
 
 @app.post("/api/series/manage/setup/clear")
 def api_series_manage_setup_clear():
-    if not session.get("club_id"):
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
 
     session.pop("series_setup_id", None)
     return jsonify({"ok": True})
@@ -2040,8 +2580,9 @@ def api_series_manage_setup_clear():
 
 @app.get("/series/new/name")
 def series_new_name_page():
-    if not session.get("club_id"):
-        return redirect("/login")
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
     return render_template(
         "series_new_name.html",
         clubName=session.get("club_name"),
@@ -2051,8 +2592,9 @@ def series_new_name_page():
 
 @app.get("/series/new/schedule")
 def series_new_schedule_page():
-    if not session.get("club_id"):
-        return redirect("/login")
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
     return render_template(
         "series_new_schedule.html",
         clubName=session.get("club_name"),
@@ -2062,8 +2604,9 @@ def series_new_schedule_page():
 
 @app.get("/series/new/scoring")
 def series_new_scoring_page():
-    if not session.get("club_id"):
-        return redirect("/login")
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
     return render_template(
         "series_new_scoring.html",
         clubName=session.get("club_name"),
@@ -2073,8 +2616,9 @@ def series_new_scoring_page():
 
 @app.get("/series/new/summary")
 def series_new_summary_page():
-    if not session.get("club_id"):
-        return redirect("/login")
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
     return render_template(
         "series_new_summary.html",
         clubName=session.get("club_name"),
@@ -2084,9 +2628,11 @@ def series_new_summary_page():
 
 @app.post("/api/series/manage/basic")
 def api_series_manage_create_basic():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
     year = (payload.get("year") or "").strip() or str(date.today().year)
@@ -2130,9 +2676,11 @@ def api_series_manage_create_basic():
 
 @app.get("/api/series/manage")
 def api_series_manage_list():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
         with db.engine.connect() as conn:
@@ -2166,9 +2714,11 @@ def api_series_manage_list():
 
 @app.get("/api/series/manage/<int:series_id>")
 def api_series_manage_get(series_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
         with db.engine.connect() as conn:
@@ -2192,9 +2742,11 @@ def api_series_manage_get(series_id):
 
 @app.post("/api/series/manage")
 def api_series_manage_create():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
     year = (payload.get("year") or "").strip()
@@ -2304,9 +2856,11 @@ def api_series_manage_create():
 
 @app.put("/api/series/manage/<int:series_id>")
 def api_series_manage_update(series_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
     year = (payload.get("year") or "").strip() or None
@@ -2352,135 +2906,50 @@ def api_series_manage_update(series_id):
 
 @app.get("/api/series/manage/<int:series_id>/rules")
 def api_series_manage_rules_list(series_id):
-    club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
 
-    try:
-        with db.engine.connect() as conn:
-            ensure_series_schedule_tables(conn)
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            rows = conn.execute(
-                text('''
-                    SELECT key, weekday, start_time, cadence_weeks, races_per_day,
-                           target_race_count, extra_start_times, valid_from, valid_to, is_active
-                    FROM "RACINGAPP"."SERIES_RULE"
-                    WHERE series = :series_id
-                    ORDER BY valid_from ASC, weekday ASC, start_time ASC, key ASC
-                '''),
-                {"series_id": series_id}
-            ).mappings().all()
-
-        rules = []
-        for r in rows:
-            item = dict(r)
-            if item.get("start_time") is not None:
-                item["start_time"] = item["start_time"].strftime("%H:%M")
-            if item.get("valid_from") is not None:
-                item["valid_from"] = item["valid_from"].isoformat()
-            if item.get("valid_to") is not None:
-                item["valid_to"] = item["valid_to"].isoformat()
-            rules.append(item)
-
-        return jsonify({"ok": True, "rules": rules})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = list_series_rules(
+        db,
+        series_id,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+        check_series_access,
+    )
+    return jsonify(payload), status
 
 
 @app.post("/api/series/manage/<int:series_id>/rules")
 def api_series_manage_rules_create(series_id):
-    club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
 
-    payload = request.get_json(silent=True) or {}
-
-    try:
-        weekday = parse_weekday(payload.get("weekday"))
-        start_time = parse_time_hh_mm(payload.get("start_time"), "start_time")
-        cadence_weeks = int(payload.get("cadence_weeks") or 1)
-        races_per_day = int(payload.get("races_per_day") or 1)
-        target_race_count = int(payload.get("race_count") or 0)
-        additional_times = parse_time_list_hh_mm(payload.get("additional_start_times"), "additional_start_times")
-        valid_from = parse_date_yyyy_mm_dd(payload.get("valid_from"), "valid_from")
-        valid_to_raw = (payload.get("valid_to") or "").strip()
-        is_active = bool(payload.get("is_active", True))
-
-        valid_to = parse_date_yyyy_mm_dd(valid_to_raw, "valid_to") if valid_to_raw else None
-
-        if cadence_weeks < 1 or races_per_day < 1:
-            return jsonify({"ok": False, "error": "cadence_weeks and races_per_day must be > 0"}), 400
-        if target_race_count < 0:
-            return jsonify({"ok": False, "error": "race_count cannot be negative"}), 400
-        if target_race_count > 0:
-            valid_to = calculate_rule_end_date(valid_from, weekday, cadence_weeks, races_per_day, target_race_count)
-        if not valid_to:
-            return jsonify({"ok": False, "error": "Provide race_count (>0) or valid_to"}), 400
-        if valid_to and valid_to < valid_from:
-            return jsonify({"ok": False, "error": "valid_to cannot be before valid_from"}), 400
-        if races_per_day > 1 and len(additional_times) != (races_per_day - 1):
-            return jsonify({
-                "ok": False,
-                "error": f"Provide exactly {races_per_day - 1} additional_start_times value(s) in HH:MM"
-            }), 400
-
-        extra_start_times = ",".join([t.strftime("%H:%M") for t in additional_times]) if additional_times else None
-
-        with db.engine.begin() as conn:
-            ensure_series_schedule_tables(conn)
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            conn.execute(
-                text('''
-                    UPDATE "RACINGAPP"."SERIESCONTROL"
-                    SET year = :year
-                    WHERE key = :series_id
-                      AND club = :club_id
-                '''),
-                {"year": str(valid_from.year), "series_id": series_id, "club_id": club_id}
-            )
-
-            rule_id = conn.execute(
-                text('''
-                    INSERT INTO "RACINGAPP"."SERIES_RULE"
-                        (key, series, weekday, start_time, cadence_weeks, races_per_day,
-                         target_race_count, extra_start_times, valid_from, valid_to, is_active)
-                    VALUES
-                        (nextval('key'), :series, :weekday, :start_time, :cadence_weeks, :races_per_day,
-                         :target_race_count, :extra_start_times, :valid_from, :valid_to, :is_active)
-                    RETURNING key
-                '''),
-                {
-                    "series": series_id,
-                    "weekday": weekday,
-                    "start_time": start_time,
-                    "cadence_weeks": cadence_weeks,
-                    "races_per_day": races_per_day,
-                    "target_race_count": target_race_count if target_race_count > 0 else None,
-                    "extra_start_times": extra_start_times,
-                    "valid_from": valid_from,
-                    "valid_to": valid_to,
-                    "is_active": is_active
-                }
-            ).scalar()
-
-            recompute_series_rule_end_dates(conn, series_id)
-
-        return jsonify({"ok": True, "rule_id": rule_id})
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = create_series_rule(
+        db,
+        request.get_json(silent=True) or {},
+        series_id,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+        check_series_access,
+        parse_weekday,
+        parse_time_hh_mm,
+        parse_time_list_hh_mm,
+        parse_date_yyyy_mm_dd,
+        calculate_rule_end_date,
+        recompute_series_rule_end_dates,
+    )
+    return jsonify(payload), status
 
 
 @app.put("/api/series/manage/<int:series_id>/rules/<int:rule_id>")
 def api_series_manage_rules_update(series_id, rule_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
 
@@ -2574,9 +3043,11 @@ def api_series_manage_rules_update(series_id, rule_id):
 
 @app.delete("/api/series/manage/<int:series_id>/rules/<int:rule_id>")
 def api_series_manage_rules_delete(series_id, rule_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
         with db.engine.begin() as conn:
@@ -2602,9 +3073,11 @@ def api_series_manage_rules_delete(series_id, rule_id):
 
 @app.get("/api/series/manage/<int:series_id>/exceptions")
 def api_series_manage_exceptions_list(series_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
         with db.engine.connect() as conn:
@@ -2630,9 +3103,11 @@ def api_series_manage_exceptions_list(series_id):
 
 @app.post("/api/series/manage/<int:series_id>/exceptions")
 def api_series_manage_exceptions_create(series_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
     ex_date_raw = (payload.get("exception_date") or "").strip()
@@ -2678,9 +3153,11 @@ def api_series_manage_exceptions_create(series_id):
 
 @app.put("/api/series/manage/<int:series_id>/exceptions/<int:exception_id>")
 def api_series_manage_exceptions_update(series_id, exception_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
     ex_date_raw = (payload.get("exception_date") or "").strip()
@@ -2733,9 +3210,11 @@ def api_series_manage_exceptions_update(series_id, exception_id):
 
 @app.delete("/api/series/manage/<int:series_id>/exceptions/<int:exception_id>")
 def api_series_manage_exceptions_delete(series_id, exception_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
         with db.engine.begin() as conn:
@@ -2765,9 +3244,11 @@ def api_series_manage_exceptions_delete(series_id, exception_id):
 
 @app.get("/api/series/manage/<int:series_id>/scoring")
 def api_series_manage_scoring_get(series_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
         with db.engine.connect() as conn:
@@ -2813,9 +3294,11 @@ def api_series_manage_scoring_get(series_id):
 
 @app.post("/api/series/manage/<int:series_id>/scoring")
 def api_series_manage_scoring_save(series_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
     discard_rules = payload.get("discard_rules") or []
@@ -2898,9 +3381,11 @@ def api_series_manage_scoring_save(series_id):
 
 @app.post("/api/series/manage/<int:series_id>/generate")
 def api_series_manage_generate(series_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
 
@@ -2933,9 +3418,11 @@ def api_series_manage_generate(series_id):
 
 @app.get("/api/series/manage/<int:series_id>/races")
 def api_series_manage_races_list(series_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
         with db.engine.connect() as conn:
@@ -2966,10 +3453,12 @@ def api_series_manage_races_list(series_id):
 
 @app.get("/club_entry")
 def club_entry():
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
+
     # Entry setup is now behind login; club comes from session
     club_id = session.get("club_id")
-    if not club_id:
-        return redirect("/login")
 
     # Clear pending race setup when starting a new entry flow
     session.pop("race", None)
@@ -2980,11 +3469,15 @@ def club_entry():
 
 @app.route("/sailor_entry")
 def sailor_entry():
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
+
     clubId = request.args.get('clubName') or session.get("club_id")
     seriesId = request.args.get('seriesName')
     raceId = request.args.get('raceId')
-    if not clubId:
-        return redirect("/login")
+    if str(clubId) != str(session.get("club_id")):
+        return redirect("/club_entry")
     session['club_id'] = clubId
     session['series_id'] = seriesId  # Store series_id in session
     race_data = session.get("race", {})
@@ -3015,8 +3508,9 @@ def api_get_series(club_id):
 @app.get("/api/races/upcoming/<club_id>")
 def api_get_upcoming_races_for_club(club_id):
     """Return the next available race in each active series for a club."""
-    if not session.get("club_id"):
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
 
     # Guard: club admins can only query their own club
     if str(session.get("club_id")) != str(club_id):
@@ -3060,9 +3554,11 @@ def api_get_upcoming_races_for_club(club_id):
 @app.get("/api/races/<int:race_id>/entries")
 def api_get_race_entries(race_id):
     """Return entry table rows for a specific race (web club flow)."""
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     try:
         with db.engine.connect() as conn:
@@ -3113,6 +3609,10 @@ def api_get_boat(sailor_id):
 
 @app.post("/api/entries")
 def api_entries():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     payload = request.get_json(silent=True) or {}
     entries = payload.get("entries") or []
     # Basic validation
@@ -3141,12 +3641,18 @@ def api_entries():
 
 @app.post("/api/set_club_series")
 def api_set_club_series():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     payload = request.get_json(silent=True) or {}
     club_id = payload.get("club_id") or session.get("club_id")
     series_id = payload.get("series_id")
     race_id = payload.get("race_id")
     if not club_id or not series_id:
         return jsonify({"ok": False, "error": "Missing club_id or series_id"}), 400
+    if str(club_id) != str(session.get("club_id")):
+        return jsonify({"ok": False, "error": "Forbidden"}), 403
     session["club_id"] = club_id
     session["series_id"] = series_id
     race_data = session.get("race", {})
@@ -3180,15 +3686,21 @@ def api_get_session_attributes():
 @app.get("/entry_sailor")
 def entry_sailor():
     """Render the sailor entry page"""
-    club_id = request.args.get("club_id", 1)  # Default to club 1, adjust as needed
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
+
+    club_id = request.args.get("club_id") or session.get("club_id")
     return render_template("sailor_entry.html", clubId=club_id)
 
 
 @app.get("/entry_summary")
 def entry_summary_page():
     """Render the entry summary page"""
-    if not session.get("club_id"):
-        return redirect("/login")
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
+
     return render_template("entry_summary.html")
 
 @app.route("/test_race")
@@ -3244,22 +3756,36 @@ def test_race():
 @app.get("/race_control")
 def race_control_page():
     """Render the race control page"""
-    if not session.get("club_id"):
-        return redirect("/login")
+    guard = require_club_admin(redirect_to_login=True)
+    if guard is not None:
+        return guard
+
     return render_template("race_control.html")
 
 
 @app.post("/api/races/start")
 def api_start_race():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    actor = get_actor_context(mobile=False)
+
     payload = request.get_json(silent=True) or {}
     race_data = session.get("race", {})
     club_id = payload.get("club_id") or race_data.get("club_id") or session.get("club_id")
     series_id = payload.get("series_id") or race_data.get("series_id") or session.get("series_id")
     selected_race_id = payload.get("race_id") or race_data.get("race_id")
     entries = payload.get("entries") or race_data.get("entries") or []
+    source_mode = (payload.get("source_mode") or "live").strip().lower()
+    if source_mode not in ("live", "retrospective"):
+        source_mode = "live"
+    reason = (payload.get("reason") or "Web race start").strip() or "Web race start"
 
     if not club_id or not series_id:
         return jsonify({"ok": False, "error": "Missing club_id or series_id"}), 400
+    if str(club_id) != str(session.get("club_id")):
+        return jsonify({"ok": False, "error": "Forbidden"}), 403
     if not entries:
         return jsonify({"ok": False, "error": "No entries provided"}), 400
 
@@ -3274,13 +3800,14 @@ def api_start_race():
     race_id = None
     race_no = None
     persisted_entries = []
+    revision_id = None
 
     try:
         with db.engine.begin() as conn:
             if selected_race_id:
                 selected = conn.execute(
                     text('''
-                        SELECT key, race_no, status
+                        SELECT key, race_no, status, results_status, results_locked_at
                         FROM "RACINGAPP"."RACE"
                         WHERE key = :race_id
                           AND club = :club_id
@@ -3292,6 +3819,8 @@ def api_start_race():
 
                 if not selected:
                     return jsonify({"ok": False, "error": "Selected race not found for this club/series"}), 404
+                if race_is_locked(selected):
+                    return jsonify({"ok": False, "error": "Results are locked for this race"}), 409
                 if selected["status"] == "finished":
                     return jsonify({"ok": False, "error": "Selected race is already finished"}), 409
 
@@ -3302,10 +3831,12 @@ def api_start_race():
                     text('''
                         UPDATE "RACINGAPP"."RACE"
                         SET status = 'active',
+                            source_mode = :source_mode,
+                            results_status = CASE WHEN results_status = 'locked' THEN results_status ELSE 'draft' END,
                             started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
                         WHERE key = :race_id
                     '''),
-                    {"race_id": race_id}
+                    {"race_id": race_id, "source_mode": source_mode}
                 )
 
                 # Reset any existing entries for this selected race before saving new entry list
@@ -3321,12 +3852,27 @@ def api_start_race():
 
                 race_id = conn.execute(
                     text('''
-                        INSERT INTO "RACINGAPP"."RACE" (club, series, race_no, status, started_at)
-                        VALUES (:club, :series, :race_no, :status, CURRENT_TIMESTAMP)
+                        INSERT INTO "RACINGAPP"."RACE" (club, series, race_no, status, started_at, source_mode, results_status)
+                        VALUES (:club, :series, :race_no, :status, CURRENT_TIMESTAMP, :source_mode, 'draft')
                         RETURNING key
                     '''),
-                    {"club": club_id, "series": series_id, "race_no": race_no, "status": "active"}
+                    {
+                        "club": club_id,
+                        "series": series_id,
+                        "race_no": race_no,
+                        "status": "active",
+                        "source_mode": source_mode,
+                    }
                 ).scalar()
+
+            revision_id = create_race_revision(
+                conn,
+                race_id,
+                actor,
+                reason=reason,
+                status="draft",
+                source_mode=source_mode,
+            )
 
             for entry in entries:
                 # Resolve and validate boatkey (must be bigint in RACE_ENTRY)
@@ -3383,8 +3929,30 @@ def api_start_race():
 
                 entry_id = conn.execute(
                     text('''
-                        INSERT INTO "RACINGAPP"."RACE_ENTRY" (race_id, boatkey, sailor, boat, sail_number, handicap)
-                        VALUES (:race_id, :boatkey, :sailor, :boat, :sail_number, :handicap)
+                        INSERT INTO "RACINGAPP"."RACE_ENTRY" (
+                            race_id,
+                            boatkey,
+                            sailor,
+                            boat,
+                            sail_number,
+                            handicap,
+                            created_by_user,
+                            created_by_type,
+                            source,
+                            revision_id
+                        )
+                        VALUES (
+                            :race_id,
+                            :boatkey,
+                            :sailor,
+                            :boat,
+                            :sail_number,
+                            :handicap,
+                            :created_by_user,
+                            :created_by_type,
+                            :source,
+                            :revision_id
+                        )
                         RETURNING key
                     '''),
                     {
@@ -3393,13 +3961,33 @@ def api_start_race():
                         "sailor": entry.get("sailor"),
                         "boat": entry.get("boat"),
                         "sail_number": entry.get("sailNumber"),
-                        "handicap": handicap
+                        "handicap": handicap,
+                        "created_by_user": actor.get("created_by_user"),
+                        "created_by_type": actor.get("created_by_type"),
+                        "source": source_mode,
+                        "revision_id": revision_id,
                     }
                 ).scalar()
 
                 persisted_entry = dict(entry)
                 persisted_entry["entry_id"] = entry_id
                 persisted_entries.append(persisted_entry)
+
+            write_race_audit(
+                conn,
+                race_id,
+                actor,
+                entity_type="race",
+                entity_id=race_id,
+                action="race_started",
+                reason=reason,
+                after_obj={
+                    "race_no": race_no,
+                    "entry_count": len(persisted_entries),
+                    "source_mode": source_mode,
+                },
+                revision_id=revision_id,
+            )
 
         race_data.update({
             "club_id": str(club_id),
@@ -3418,75 +4006,361 @@ def api_start_race():
 
 @app.post("/api/races/<int:race_id>/lap")
 def api_record_race_lap(race_id):
-    payload = request.get_json(silent=True) or {}
-    entry_id = payload.get("entry_id")
-    lap_number = payload.get("lap_number")
-    elapsed_time = payload.get("elapsed_time")
-    corrected_time = payload.get("corrected_time")
-    position = payload.get("position")
-    is_finish = bool(payload.get("is_finish", False))
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
 
-    if not all([entry_id, lap_number, elapsed_time]):
-        return jsonify({"ok": False, "error": "Missing required lap fields"}), 400
+    payload, status = web_record_lap(
+        db,
+        race_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=False),
+        parse_hms_to_seconds,
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
 
-    try:
-        elapsed_sec = parse_hms_to_seconds(elapsed_time)
-        corrected_sec = parse_hms_to_seconds(corrected_time) if corrected_time and corrected_time != "N/A" else None
 
-        with db.engine.begin() as conn:
-            entry_exists = conn.execute(
-                text('SELECT 1 FROM "RACINGAPP"."RACE_ENTRY" WHERE key = :entry_id AND race_id = :race_id'),
-                {"entry_id": entry_id, "race_id": race_id}
-            ).scalar()
+@app.post("/api/races/<int:race_id>/entries")
+def api_add_race_entry(race_id):
+    guard = require_club_admin_or_race_officer()
+    if guard is not None:
+        return guard
 
-            if not entry_exists:
-                return jsonify({"ok": False, "error": "Race entry not found"}), 404
+    payload, status = add_race_entry(
+        db,
+        race_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=False),
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
 
-            conn.execute(
-                text('''
-                    INSERT INTO "RACINGAPP"."LAP" (race_entry_id, lap_number, is_finish, elapsed_sec, corrected_sec, position)
-                    VALUES (:race_entry_id, :lap_number, :is_finish, :elapsed_sec, :corrected_sec, :position)
-                '''),
-                {
-                    "race_entry_id": entry_id,
-                    "lap_number": lap_number,
-                    "is_finish": is_finish,
-                    "elapsed_sec": elapsed_sec,
-                    "corrected_sec": corrected_sec,
-                    "position": position
-                }
-            )
 
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+@app.delete("/api/races/<int:race_id>/entries/<int:entry_id>")
+def api_remove_race_entry(race_id, entry_id):
+    guard = require_club_admin_or_race_officer()
+    if guard is not None:
+        return guard
+
+    payload, status = remove_race_entry(
+        db,
+        race_id,
+        entry_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=False),
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
+@app.patch("/api/races/<int:race_id>/laps/<int:lap_id>")
+def api_edit_race_lap(race_id, lap_id):
+    guard = require_club_admin_or_race_officer()
+    if guard is not None:
+        return guard
+
+    payload, status = edit_race_lap(
+        db,
+        race_id,
+        lap_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=False),
+        parse_hms_to_seconds,
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
+@app.delete("/api/races/<int:race_id>/laps/<int:lap_id>")
+def api_delete_race_lap(race_id, lap_id):
+    guard = require_club_admin_or_race_officer()
+    if guard is not None:
+        return guard
+
+    payload, status = delete_race_lap(
+        db,
+        race_id,
+        lap_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=False),
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
 
 
 @app.post("/api/races/<int:race_id>/finish")
 def api_finish_race(race_id):
-    try:
-        with db.engine.begin() as conn:
-            updated = conn.execute(
-                text('''
-                    UPDATE "RACINGAPP"."RACE"
-                    SET status = :status,
-                        ended_at = CURRENT_TIMESTAMP
-                    WHERE key = :race_id
-                '''),
-                {"status": "finished", "race_id": race_id}
-            )
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
 
-        if updated.rowcount == 0:
-            return jsonify({"ok": False, "error": "Race not found"}), 404
+    payload, status = web_finish_race(
+        db,
+        race_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=False),
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
 
+    if status == 200 and payload.get("ok"):
         race_data = session.get("race", {})
         if race_data.get("race_id") == race_id:
             race_data["status"] = "finished"
             session["race"] = race_data
 
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify(payload), status
+
+
+@app.get("/api/races/retrospective")
+def api_list_retrospective_races():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = list_retrospective_races(
+        db,
+        session.get("club_id"),
+        request.args.get("series_id"),
+        (request.args.get("from_date") or "").strip(),
+        (request.args.get("to_date") or "").strip(),
+        parse_date_yyyy_mm_dd,
+    )
+    return jsonify(payload), status
+
+
+@app.post("/api/races/retrospective")
+def api_create_retrospective_race():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = create_retrospective_race(
+        db,
+        request.get_json(silent=True) or {},
+        session.get("club_id"),
+        get_actor_context(mobile=False),
+        parse_iso_datetime,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
+@app.post("/api/races/<int:race_id>/retrospective/draft")
+def api_save_retrospective_draft(race_id):
+    guard = require_club_admin_or_race_officer()
+    if guard is not None:
+        return guard
+
+    payload, status = save_retrospective_draft(
+        db,
+        race_id,
+        request.get_json(silent=True) or {},
+        session.get("club_id"),
+        get_actor_context(mobile=False),
+        parse_hms_to_seconds,
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
+@app.get("/api/races/<int:race_id>/retrospective/preview")
+def api_preview_retrospective_results(race_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = preview_retrospective_results(
+        db,
+        race_id,
+        session.get("club_id"),
+        race_is_locked,
+    )
+    return jsonify(payload), status
+
+
+@app.post("/api/races/<int:race_id>/results/publish")
+def api_publish_race_results(race_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = publish_race_results(
+        db,
+        race_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=False),
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
+@app.post("/api/races/<int:race_id>/results/lock")
+def api_lock_race_results(race_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = lock_results(
+        db,
+        race_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=False),
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
+@app.post("/api/races/<int:race_id>/results/unlock")
+def api_unlock_race_results(race_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = unlock_results(
+        db,
+        race_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=False),
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
+@app.get("/api/races/<int:race_id>/audit")
+def api_get_race_audit(race_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = get_race_audit(db, race_id, session.get("club_id"))
+    return jsonify(payload), status
+
+
+@app.get("/api/races/<int:race_id>/revisions")
+def api_get_race_revisions(race_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = get_race_revisions(db, race_id, session.get("club_id"))
+    return jsonify(payload), status
+
+
+@app.post("/api/races/<int:race_id>/handicap-recommendations/<int:recommendation_id>/decision")
+def api_decide_handicap_recommendation(race_id, recommendation_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = decide_handicap_recommendation(
+        db,
+        race_id,
+        session.get("club_id"),
+        recommendation_id,
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=False),
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
+@app.get("/api/races/<int:race_id>/duties")
+def api_list_race_duties(race_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = list_race_duties(db, race_id, session.get("club_id"))
+    return jsonify(payload), status
+
+
+@app.post("/api/races/<int:race_id>/duties")
+def api_assign_race_duty(race_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = assign_race_duty(
+        db,
+        race_id,
+        request.get_json(silent=True) or {},
+        session.get("club_id"),
+        get_actor_context(mobile=False),
+        parse_iso_datetime,
+        resolve_role_id,
+        upsert_race_duty_assignment,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
+@app.post("/api/races/duties/by-date")
+def api_assign_race_duty_by_date():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = assign_race_duty_by_date(
+        db,
+        request.get_json(silent=True) or {},
+        session.get("club_id"),
+        get_actor_context(mobile=False),
+        parse_iso_datetime,
+        parse_date_yyyy_mm_dd,
+        resolve_role_id,
+        upsert_race_duty_assignment,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
+@app.delete("/api/races/<int:race_id>/duties/<int:duty_id>")
+def api_delete_race_duty(race_id, duty_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
+    payload, status = delete_race_duty(
+        db,
+        race_id,
+        duty_id,
+        session.get("club_id"),
+        get_actor_context(mobile=False),
+        write_race_audit,
+    )
+    return jsonify(payload), status
 
 
 @app.get("/race_summary")
@@ -3498,6 +4372,10 @@ def race_summary_page():
 @app.get("/api/races/<int:race_id>/summary")
 def api_race_summary(race_id):
     """Return full race summary: metadata + results per entry"""
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+
     try:
         with db.engine.connect() as conn:
             race_row = conn.execute(
@@ -3508,8 +4386,9 @@ def api_race_summary(race_id):
                     JOIN "RACINGAPP"."CLUBCONTROL" cc ON r.club = cc.key
                     JOIN "RACINGAPP"."SERIESCONTROL" sc ON r.series = sc.key
                     WHERE r.key = :race_id
+                      AND r.club = :club_id
                 '''),
-                {"race_id": race_id}
+                {"race_id": race_id, "club_id": session.get("club_id")}
             ).mappings().first()
 
             if not race_row:
