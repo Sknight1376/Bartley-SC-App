@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+  <style>
+    .wrap { width: 1000px; margin: 20px auto; }
+    .card { background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:16px; margin-bottom:16px; }
+    .row { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
+    .field { min-width:170px; }
+    .field label { display:block; font-size:13px; color:#444; margin-bottom:4px; }
+    .field input { width:100%; height:36px; border:1px solid #d0d0d0; border-radius:6px; padding:0 10px; }
+    .btn { background:#1331C5; color:#fff; border:0; border-radius:6px; height:36px; padding:0 14px; cursor:pointer; }
+    .mini-table { width:100%; border-collapse:collapse; background:#fff; font-size:13px; margin-top:8px; }
+    .mini-table th,.mini-table td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
+    .muted { color:#666; font-size:12px; }
+    .info-banner { margin: 20px auto 0; width: 1000px; padding:10px 12px; border-radius:8px; background:#f7f8ff; border:1px solid #d7d9fd; color:#4250a6; font-size:13px; box-sizing:border-box; }
+  </style>
+</head>
+<body data-current-series-id="{{ currentSeriesId or '' }}">
+<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
+<section class="banner"></section>
+<br>
+
+<div class="form-border">
+  <div class="entry-banner">
+    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">1. Add New Series</div>
+    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">2. Series Name</div>
+    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">3. Scheduling</div>
+    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">4. Scoring</div>
+    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color:#fff; text-align:center; line-height:40px;">5. Summary</div>
+  </div>
+  <br>
+  <h4 style="color:#979797">Step Five</h4>
+  <h2>Series Summary</h2>
+  <h4 id="seriesHeader" style="color:#979797">Review before generating races.</h4>
+</div>
+
+<div id="loadedState" class="info-banner">Loading current saved setup for this series...</div>
+
+<div class="wrap">
+  <div class="card">
+    <h4>Schedule Rules</h4>
+    <table class="mini-table"><thead><tr><th>Weekday</th><th>Times</th><th>Cadence</th><th>Races</th><th>Range</th></tr></thead><tbody id="rulesBody"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h4>Exception Days</h4>
+    <table class="mini-table"><thead><tr><th>Date</th><th>Note</th></tr></thead><tbody id="exceptionsBody"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h4>Scoring</h4>
+    <table class="mini-table"><thead><tr><th>Rule</th><th>After X Races</th></tr></thead><tbody id="scoringBody"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h4>Generate Races</h4>
+    <div class="row">
+      <div class="field"><label for="genFromDate">From</label><input id="genFromDate" type="date"></div>
+      <div class="field"><label for="genToDate">To</label><input id="genToDate" type="date"></div>
+      <button id="generateBtn" class="btn">Generate Races</button>
+      <span id="generateStatus" class="muted"></span>
+    </div>
+    <table class="mini-table"><thead><tr><th>Race #</th><th>Start</th><th>Status</th></tr></thead><tbody id="racesBody"></tbody></table>
+  </div>
+</div>
+
+<div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
+  <button class="blue-button" id="backBtn">Back</button>
+  <button class="blue-button" onclick="window.location.href='/series'">Finish</button>
+</div>
+
+<script>
+let selectedSeriesId = null;
+function getSeriesId(){ return new URLSearchParams(window.location.search).get('series_id') || document.body.dataset.currentSeriesId || null; }
+function esc(v){ return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#039;'); }
+function fmtWeekday(n){ const d=['Mon','Tue','Wed','Thu','Fri','Sat','Sun']; return Number.isInteger(Number(n)) ? d[Number(n)] ?? String(n) : String(n); }
+
+function setDefaultGenerateDates(rules){
+  const today = new Date();
+  let minFrom = null, maxTo = null;
+  (rules||[]).forEach(r=>{
+    if(r.valid_from && (!minFrom || r.valid_from < minFrom)) minFrom = r.valid_from;
+    if(r.valid_to && (!maxTo || r.valid_to > maxTo)) maxTo = r.valid_to;
+  });
+  const from = minFrom || `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const toDate = new Date(today); toDate.setDate(toDate.getDate()+120);
+  const fallbackTo = `${toDate.getFullYear()}-${String(toDate.getMonth()+1).padStart(2,'0')}-${String(toDate.getDate()).padStart(2,'0')}`;
+  document.getElementById('genFromDate').value = from;
+  document.getElementById('genToDate').value = maxTo || fallbackTo;
+}
+
+function setLoadedState(message){
+  document.getElementById('loadedState').textContent = message;
+}
+
+async function loadAll(){
+  const [seriesRes, rulesRes, exRes, scoreRes, racesRes] = await Promise.all([
+    fetch(`/api/series/manage/${selectedSeriesId}`, {cache:'no-store'}),
+    fetch(`/api/series/manage/${selectedSeriesId}/rules`, {cache:'no-store'}),
+    fetch(`/api/series/manage/${selectedSeriesId}/exceptions`, {cache:'no-store'}),
+    fetch(`/api/series/manage/${selectedSeriesId}/scoring`, {cache:'no-store'}),
+    fetch(`/api/series/manage/${selectedSeriesId}/races`, {cache:'no-store'})
+  ]);
+  const seriesData = await seriesRes.json().catch(()=>({}));
+  const rulesData = await rulesRes.json().catch(()=>({}));
+  const exData = await exRes.json().catch(()=>({}));
+  const scoreData = await scoreRes.json().catch(()=>({}));
+  const racesData = await racesRes.json().catch(()=>({}));
+
+  if(seriesRes.ok && seriesData.ok && seriesData.series){ document.getElementById('seriesHeader').textContent = `${seriesData.series.name} (${seriesData.series.year})`; }
+
+  const rulesBody = document.getElementById('rulesBody'); rulesBody.innerHTML='';
+  (rulesData.rules||[]).forEach(r=>{ const times=[r.start_time].concat(String(r.extra_start_times||'').split(',').map(v=>v.trim()).filter(Boolean)).join(', '); const tr=document.createElement('tr'); tr.innerHTML=`<td>${esc(fmtWeekday(r.weekday))}</td><td>${esc(times)}</td><td>${esc(r.cadence_weeks)}w</td><td>${esc(r.target_race_count||'-')}</td><td>${esc(r.valid_from)} → ${esc(r.valid_to||'-')}</td>`; rulesBody.appendChild(tr);});
+  if(!rulesBody.children.length){ const tr=document.createElement('tr'); tr.innerHTML='<td colspan="5" style="color:#888;">No rules configured.</td>'; rulesBody.appendChild(tr);} 
+
+  const exBody = document.getElementById('exceptionsBody'); exBody.innerHTML='';
+  (exData.exceptions||[]).forEach(x=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${esc(x.exception_date||'-')}</td><td>${esc(x.note||'')}</td>`; exBody.appendChild(tr);});
+  if(!exBody.children.length){ const tr=document.createElement('tr'); tr.innerHTML='<td colspan="2" style="color:#888;">No exception days configured.</td>'; exBody.appendChild(tr);} 
+
+  const scoreBody=document.getElementById('scoringBody'); scoreBody.innerHTML='';
+  const dr=(scoreData.scoring&&scoreData.scoring.discard_rules)||[];
+  dr.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>Discard ${esc(r.discard_count)}</td><td>${esc(r.after_races)}</td>`; scoreBody.appendChild(tr);});
+  if(!scoreBody.children.length){ const tr=document.createElement('tr'); tr.innerHTML='<td colspan="2" style="color:#888;">No discard rules configured.</td>'; scoreBody.appendChild(tr);} 
+
+  const ruleCount = (rulesData.rules || []).length;
+  const exceptionCount = (exData.exceptions || []).length;
+  const discardCount = dr.length;
+  setLoadedState(`Showing saved setup for this series: ${ruleCount} schedule rule${ruleCount === 1 ? '' : 's'}, ${exceptionCount} exception${exceptionCount === 1 ? '' : 's'}, ${discardCount} discard rule${discardCount === 1 ? '' : 's'}.`);
+
+  renderRaces((racesData.races||[]));
+  setDefaultGenerateDates(rulesData.rules||[]);
+}
+
+function renderRaces(races){
+  const body=document.getElementById('racesBody'); body.innerHTML='';
+  races.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${esc(r.race_no)}</td><td>${esc((r.started_at||'').replace('T',' ').replace('Z',''))}</td><td>${esc(r.status||'')}</td>`; body.appendChild(tr);});
+  if(!body.children.length){ const tr=document.createElement('tr'); tr.innerHTML='<td colspan="3" style="color:#888;">No races generated yet.</td>'; body.appendChild(tr);} 
+}
+
+async function generate(){
+  const payload={ from_date: document.getElementById('genFromDate').value, to_date: document.getElementById('genToDate').value };
+  const res=await fetch(`/api/series/manage/${selectedSeriesId}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok||!data.ok){ alert(data.error||'Failed to generate races'); return; }
+  document.getElementById('generateStatus').textContent=`Inserted ${data.inserted_count}, skipped ${data.skipped_count}, planned ${data.planned_count}`;
+  const racesRes=await fetch(`/api/series/manage/${selectedSeriesId}/races`,{cache:'no-store'});
+  const racesData=await racesRes.json().catch(()=>({}));
+  if(racesRes.ok&&racesData.ok) renderRaces(racesData.races||[]);
+}
+
+(async function init(){
+  selectedSeriesId=getSeriesId();
+  if(!selectedSeriesId){ window.location.href='/series/new/name'; return; }
+  document.getElementById('backBtn').addEventListener('click',()=>window.location.href=`/series/new/scoring?series_id=${selectedSeriesId}`);
+  document.getElementById('generateBtn').addEventListener('click',generate);
+  try { await loadAll(); } catch(e){ alert(e.message||'Failed to load summary'); }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="refresh" content="0; url=/series/new/start">
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+</head>
+<body>
+<div class="form-border" style="text-align:center; margin-top:40px;">
+  <h2>Redirecting to Series Setup</h2>
+  <p><a href="/series/new/start">Continue to the guided series setup</a></p>
+  <p><a href="/series">Back to Series List</a></p>
+</div>
+</body>
+</html>
+      <h3 id="basicTitle" style="margin:0;">1) Create Basic Series</h3>
+      <button class="btn secondary" onclick="window.location.href='/series'">Back to Series List</button>
+    </div>
+    <div class="row">
+      <div class="field" style="max-width:320px;">
+        <label for="seriesName">Series Name</label>
+        <input id="seriesName" type="text" placeholder="e.g. Summer Evening Series">
+      </div>
+      <button id="createSeriesBtn" class="btn">Create Series</button>
+      <span id="seriesStatus" class="pill" style="display:none;"></span>
+    </div>
+  </div>
+
+  <div id="configPanel" class="series-card" style="display:none;">
+    <h3>2) Schedule & Exceptions</h3>
+    <div class="split">
+      <div class="sub-card">
+        <h4>Add Schedule Rule</h4>
+        <div class="row">
+          <div class="field" style="max-width:140px;"><label for="ruleWeekday">Weekday</label><input id="ruleWeekday" class="small-input" value="saturday"></div>
+          <div class="field" style="max-width:120px;"><label for="ruleStartTime">Start Time</label><input id="ruleStartTime" class="small-input" value="11:00"></div>
+          <div class="field" style="max-width:120px;"><label for="ruleCadence">Cadence</label><input id="ruleCadence" class="small-input" type="number" min="1" value="1"></div>
+          <div class="field" style="max-width:120px;"><label for="ruleRacesPerDay">Races/Day</label><input id="ruleRacesPerDay" class="small-input" type="number" min="1" value="1"></div>
+          <div class="field" style="max-width:120px;"><label for="ruleRaceCount">Race Count</label><input id="ruleRaceCount" class="small-input" type="number" min="1" value="1"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label for="ruleAdditionalTimes">Additional Start Times (comma-separated HH:MM)</label><input id="ruleAdditionalTimes" class="small-input" placeholder="12:00,13:00"></div>
+        </div>
+        <div class="row">
+          <div class="field" style="max-width:180px;"><label for="ruleValidFrom">Start Date</label><input id="ruleValidFrom" class="small-input" type="date"></div>
+          <div class="field" style="max-width:180px;"><label for="ruleValidTo">End Date (auto)</label><input id="ruleValidTo" class="small-input" type="date" readonly></div>
+          <button id="addRuleBtn" class="btn">Add Rule</button>
+        </div>
+        <div class="muted">For concurrent regatta days, add one rule per day with the same date range.</div>
+
+        <div style="margin-top:10px; max-height:220px; overflow:auto;">
+          <table class="mini-table">
+            <thead><tr><th>Weekday</th><th>Times</th><th>Cadence</th><th>Races</th><th>Range</th><th>Action</th></tr></thead>
+            <tbody id="rulesBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="sub-card">
+        <h4>Exception Days (No Racing)</h4>
+        <div class="row">
+          <div class="field" style="max-width:180px;"><label for="exDate">Date</label><input id="exDate" class="small-input" type="date"></div>
+          <div class="field"><label for="exNote">Note</label><input id="exNote" class="small-input" placeholder="e.g. bank holiday closure"></div>
+          <button id="addExceptionBtn" class="btn">Add Exception</button>
+        </div>
+        <div style="margin-top:10px; max-height:220px; overflow:auto;">
+          <table class="mini-table">
+            <thead><tr><th>Date</th><th>Note</th></tr></thead>
+            <tbody id="exceptionsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="sub-card" style="margin-top:14px;">
+      <h4>3) Scoring Rules</h4>
+      <div class="row" style="align-items:center;">
+        <span class="pill">Low Point (fixed)</span>
+        <button id="addDiscardRuleBtn" class="btn secondary">Add Discard Rule</button>
+        <button id="saveScoringBtn" class="btn">Save Scoring</button>
+      </div>
+      <div class="muted" style="margin-top:8px;">Define thresholds like: discard 1 after X races, discard 2 after Y races, etc.</div>
+      <div style="margin-top:10px; max-height:220px; overflow:auto;">
+        <table class="mini-table">
+          <thead><tr><th>Rule</th><th>After X Races</th><th>Action</th></tr></thead>
+          <tbody id="discardRulesBody"></tbody>
+        </table>
+      </div>
+      <div id="scoringStatus" class="muted"></div>
+    </div>
+
+    <div class="sub-card" style="margin-top:14px;">
+      <h4>4) Generate Races</h4>
+      <div class="row">
+        <div class="field" style="max-width:170px;"><label for="genFromDate">From</label><input id="genFromDate" type="date"></div>
+        <div class="field" style="max-width:170px;"><label for="genToDate">To</label><input id="genToDate" type="date"></div>
+        <button id="generateBtn" class="btn">Generate</button>
+        <span id="generateStatus" class="muted"></span>
+      </div>
+      <div style="margin-top:10px; max-height:220px; overflow:auto;">
+        <table class="mini-table">
+          <thead><tr><th>Race #</th><th>Start</th><th>Status</th></tr></thead>
+          <tbody id="generatedRacesBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let selectedSeriesId = null;
+let discardRules = [];
+
+function getQueryParam(name) {
+  return new URLSearchParams(window.location.search).get(name);
+}
+
+function esc(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function fmtWeekday(n) {
+  const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  return Number.isInteger(Number(n)) ? days[Number(n)] ?? String(n) : String(n);
+}
+
+function parseWeekdayInput(v) {
+  const raw = String(v || '').trim().toLowerCase();
+  const map = { monday:0, mon:0, tuesday:1, tue:1, wednesday:2, wed:2, thursday:3, thu:3, friday:4, fri:4, saturday:5, sat:5, sunday:6, sun:6 };
+  if (raw in map) return map[raw];
+  const n = Number(raw);
+  return (Number.isInteger(n) && n >= 0 && n <= 6) ? n : null;
+}
+
+function addDaysISO(isoDate, days) {
+  const d = new Date(`${isoDate}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function recalcRuleEndDate() {
+  const start = document.getElementById('ruleValidFrom').value;
+  const weekday = parseWeekdayInput(document.getElementById('ruleWeekday').value);
+  const cadence = Number(document.getElementById('ruleCadence').value || 1);
+  const racesPerDay = Number(document.getElementById('ruleRacesPerDay').value || 1);
+  const raceCount = Number(document.getElementById('ruleRaceCount').value || 0);
+  const endInput = document.getElementById('ruleValidTo');
+
+  if (!start || weekday === null || cadence < 1 || racesPerDay < 1 || raceCount < 1) {
+    endInput.value = '';
+    return;
+  }
+
+  const startDate = new Date(`${start}T00:00:00`);
+  const daysToAdd = (weekday - ((startDate.getDay() + 6) % 7) + 7) % 7;
+  let current = addDaysISO(start, daysToAdd);
+  let remaining = raceCount;
+  while (remaining > 0) {
+    remaining -= Math.min(racesPerDay, remaining);
+    if (remaining <= 0) break;
+    current = addDaysISO(current, 7 * cadence);
+  }
+  endInput.value = current;
+}
+
+function initDates() {
+  const today = new Date();
+  const from = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const toDate = new Date(today);
+  toDate.setDate(toDate.getDate() + 120);
+  const to = `${toDate.getFullYear()}-${String(toDate.getMonth() + 1).padStart(2, '0')}-${String(toDate.getDate()).padStart(2, '0')}`;
+  if (!document.getElementById('ruleValidFrom').value) document.getElementById('ruleValidFrom').value = from;
+  document.getElementById('genFromDate').value = from;
+  document.getElementById('genToDate').value = to;
+  recalcRuleEndDate();
+}
+
+async function createSeriesBasic() {
+  const name = document.getElementById('seriesName').value.trim();
+  const inferredYear = (document.getElementById('ruleValidFrom').value || '').slice(0, 4) || String(new Date().getFullYear());
+  if (!name) {
+    alert('Series name is required.');
+    return;
+  }
+
+  const endpoint = selectedSeriesId ? `/api/series/manage/${selectedSeriesId}` : '/api/series/manage/basic';
+  const method = selectedSeriesId ? 'PUT' : 'POST';
+
+  const res = await fetch(endpoint, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, year: inferredYear })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || `Failed to ${selectedSeriesId ? 'save' : 'create'} series`);
+    return;
+  }
+
+  if (!selectedSeriesId) {
+    selectedSeriesId = data.series_id;
+  }
+  const status = document.getElementById('seriesStatus');
+  status.style.display = 'inline-block';
+  status.textContent = selectedSeriesId ? `Series #${selectedSeriesId} ready` : 'Series saved';
+  document.getElementById('configPanel').style.display = 'block';
+  initDates();
+  await Promise.all([loadRules(), loadExceptions(), loadScoring(), loadGeneratedRaces()]);
+}
+
+async function loadExistingSeries(seriesId) {
+  const res = await fetch(`/api/series/manage/${seriesId}`, { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to load series');
+  }
+
+  selectedSeriesId = Number(seriesId);
+  document.getElementById('seriesName').value = data.series.name || '';
+  document.getElementById('createSeriesBtn').textContent = 'Save Basic Details';
+  document.getElementById('basicTitle').textContent = '1) Basic Series Details';
+  const status = document.getElementById('seriesStatus');
+  status.style.display = 'inline-block';
+  status.textContent = `Editing Series #${selectedSeriesId}`;
+  document.getElementById('configPanel').style.display = 'block';
+  initDates();
+  await Promise.all([loadRules(), loadExceptions(), loadScoring(), loadGeneratedRaces()]);
+}
+
+async function loadRules() {
+  if (!selectedSeriesId) return;
+  const res = await fetch(`/api/series/manage/${selectedSeriesId}/rules`, { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load rules');
+
+  const tbody = document.getElementById('rulesBody');
+  tbody.innerHTML = '';
+  (data.rules || []).forEach(r => {
+    const startTimes = [r.start_time].concat(String(r.extra_start_times || '').split(',').map(v => v.trim()).filter(Boolean)).join(', ');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc(fmtWeekday(r.weekday))}</td><td>${esc(startTimes)}</td><td>${esc(r.cadence_weeks)}w</td><td>${esc(r.target_race_count || '-')}</td><td>${esc(r.valid_from)} → ${esc(r.valid_to || '-')}</td><td><button class="btn secondary" onclick="deleteRule(${r.key})">Remove</button></td>`;
+    tbody.appendChild(tr);
+  });
+  if (!tbody.children.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="6" style="color:#888;">No rules configured.</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+async function deleteRule(ruleId) {
+  if (!selectedSeriesId) return;
+  if (!confirm('Remove this rule?')) return;
+  const res = await fetch(`/api/series/manage/${selectedSeriesId}/rules/${ruleId}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to remove rule');
+    return;
+  }
+  await loadRules();
+}
+
+async function addRule() {
+  if (!selectedSeriesId) return;
+  const additionalStartTimes = document.getElementById('ruleAdditionalTimes').value.split(',').map(v => v.trim()).filter(Boolean);
+
+  const payload = {
+    weekday: document.getElementById('ruleWeekday').value.trim() || 'saturday',
+    start_time: document.getElementById('ruleStartTime').value.trim(),
+    cadence_weeks: Number(document.getElementById('ruleCadence').value || 1),
+    races_per_day: Number(document.getElementById('ruleRacesPerDay').value || 1),
+    race_count: Number(document.getElementById('ruleRaceCount').value || 0),
+    additional_start_times: additionalStartTimes,
+    valid_from: document.getElementById('ruleValidFrom').value,
+    valid_to: document.getElementById('ruleValidTo').value,
+  };
+
+  if (!payload.start_time || !payload.valid_from || payload.race_count <= 0 || !payload.valid_to) {
+    alert('start_time, valid_from and race_count are required.');
+    return;
+  }
+  if (payload.races_per_day > 1 && additionalStartTimes.length !== (payload.races_per_day - 1)) {
+    alert(`Please add exactly ${payload.races_per_day - 1} additional start time(s).`);
+    return;
+  }
+
+  const res = await fetch(`/api/series/manage/${selectedSeriesId}/rules`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to add rule');
+    return;
+  }
+  await loadRules();
+}
+
+async function loadExceptions() {
+  if (!selectedSeriesId) return;
+  const res = await fetch(`/api/series/manage/${selectedSeriesId}/exceptions`, { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load exceptions');
+
+  const tbody = document.getElementById('exceptionsBody');
+  tbody.innerHTML = '';
+  (data.exceptions || []).forEach(x => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc(x.exception_date || '-')}</td><td>${esc(x.note || '')}</td>`;
+    tbody.appendChild(tr);
+  });
+  if (!tbody.children.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="2" style="color:#888;">No exception days configured.</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+async function addException() {
+  if (!selectedSeriesId) return;
+  const payload = {
+    exception_date: document.getElementById('exDate').value,
+    note: document.getElementById('exNote').value.trim() || null
+  };
+  if (!payload.exception_date) {
+    alert('exception_date is required.');
+    return;
+  }
+
+  const res = await fetch(`/api/series/manage/${selectedSeriesId}/exceptions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to add exception');
+    return;
+  }
+  await loadExceptions();
+}
+
+async function loadScoring() {
+  if (!selectedSeriesId) return;
+  const res = await fetch(`/api/series/manage/${selectedSeriesId}/scoring`, { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load scoring');
+  const s = data.scoring || {};
+  discardRules = Array.isArray(s.discard_rules)
+    ? s.discard_rules.map(r => ({ discard_count: Number(r.discard_count), after_races: Number(r.after_races) }))
+    : [];
+  renderDiscardRules();
+}
+
+function renderDiscardRules() {
+  const tbody = document.getElementById('discardRulesBody');
+  tbody.innerHTML = '';
+
+  discardRules.forEach((rule, idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>Discard ${rule.discard_count}</td>
+      <td><input class="small-input" type="number" min="1" value="${rule.after_races}" onchange="updateDiscardAfter(${idx}, this.value)"></td>
+      <td><button class="btn secondary" onclick="removeDiscardRule(${idx})">Remove</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  if (!tbody.children.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="3" style="color:#888;">No discard rules configured.</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+function addDiscardRule() {
+  const nextCount = discardRules.length + 1;
+  const defaultAfter = discardRules.length
+    ? (Number(discardRules[discardRules.length - 1].after_races) + 1)
+    : 2;
+  discardRules.push({ discard_count: nextCount, after_races: defaultAfter });
+  renderDiscardRules();
+}
+
+function removeDiscardRule(idx) {
+  discardRules.splice(idx, 1);
+  discardRules = discardRules.map((r, i) => ({ discard_count: i + 1, after_races: Number(r.after_races) }));
+  renderDiscardRules();
+}
+
+function updateDiscardAfter(idx, value) {
+  discardRules[idx].after_races = Number(value || 0);
+}
+
+async function saveScoring() {
+  if (!selectedSeriesId) return;
+  const payload = {
+    discard_rules: discardRules.map((r, i) => ({
+      discard_count: i + 1,
+      after_races: Number(r.after_races)
+    }))
+  };
+
+  if (payload.discard_rules.some(r => !Number.isInteger(r.after_races) || r.after_races < 1)) {
+    alert('Each discard rule must have after_races >= 1');
+    return;
+  }
+
+  const res = await fetch(`/api/series/manage/${selectedSeriesId}/scoring`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to save scoring');
+    return;
+  }
+  document.getElementById('scoringStatus').textContent = 'Scoring saved.';
+}
+
+async function generateRaces() {
+  if (!selectedSeriesId) return;
+  const payload = {
+    from_date: document.getElementById('genFromDate').value,
+    to_date: document.getElementById('genToDate').value
+  };
+
+  const res = await fetch(`/api/series/manage/${selectedSeriesId}/generate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || 'Failed to generate races');
+    return;
+  }
+  document.getElementById('generateStatus').textContent = `Inserted ${data.inserted_count}, skipped ${data.skipped_count}`;
+  await loadGeneratedRaces();
+}
+
+async function loadGeneratedRaces() {
+  if (!selectedSeriesId) return;
+  const res = await fetch(`/api/series/manage/${selectedSeriesId}/races`, { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load generated races');
+
+  const tbody = document.getElementById('generatedRacesBody');
+  tbody.innerHTML = '';
+  (data.races || []).forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc(r.race_no)}</td><td>${esc((r.started_at || '').replace('T', ' ').replace('Z', ''))}</td><td>${esc(r.status || '')}</td>`;
+    tbody.appendChild(tr);
+  });
+  if (!tbody.children.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="3" style="color:#888;">No generated races yet.</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById('createSeriesBtn').addEventListener('click', createSeriesBasic);
+document.getElementById('addRuleBtn').addEventListener('click', addRule);
+document.getElementById('addExceptionBtn').addEventListener('click', addException);
+document.getElementById('addDiscardRuleBtn').addEventListener('click', addDiscardRule);
+document.getElementById('saveScoringBtn').addEventListener('click', saveScoring);
+document.getElementById('generateBtn').addEventListener('click', generateRaces);
+document.getElementById('ruleWeekday').addEventListener('input', recalcRuleEndDate);
+document.getElementById('ruleCadence').addEventListener('input', recalcRuleEndDate);
+document.getElementById('ruleRacesPerDay').addEventListener('input', recalcRuleEndDate);
+document.getElementById('ruleRaceCount').addEventListener('input', recalcRuleEndDate);
+document.getElementById('ruleValidFrom').addEventListener('change', recalcRuleEndDate);
+
+(async function initPage() {
+  const qSeriesId = getQueryParam('series_id');
+  if (qSeriesId) {
+    try {
+      await loadExistingSeries(qSeriesId);
+      return;
+    } catch (e) {
+      alert(e.message || 'Failed to load series setup');
+    }
+  }
+  initDates();
+})();
+</script>
+
+</body>
+</html>

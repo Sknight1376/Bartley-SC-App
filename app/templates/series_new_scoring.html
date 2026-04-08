@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+  <style>
+    .wrap { width: 1000px; margin: 20px auto; }
+    .card { background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:16px; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .btn { background:#1331C5; color:#fff; border:0; border-radius:6px; height:36px; padding:0 14px; cursor:pointer; }
+    .btn.secondary { background:#6b7280; }
+    .small-input { height:30px; border:1px solid #d0d0d0; border-radius:6px; padding:0 8px; width:120px; }
+    .mini-table { width:100%; border-collapse:collapse; background:#fff; font-size:13px; margin-top:10px; }
+    .mini-table th,.mini-table td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
+    .pill { display:inline-block; background:#ecf1ff; color:#1331C5; border:1px solid #cfd8ff; border-radius:999px; padding:4px 10px; font-size:12px; }
+    .muted { color:#666; font-size:12px; }
+    .info-banner { margin-top:10px; padding:10px 12px; border-radius:8px; background:#f7f8ff; border:1px solid #d7d9fd; color:#4250a6; font-size:13px; }
+  </style>
+</head>
+<body data-current-series-id="{{ currentSeriesId or '' }}">
+<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
+<section class="banner"></section>
+<br>
+
+<div class="form-border">
+  <div class="entry-banner">
+    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">1. Add New Series</div>
+    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">2. Series Name</div>
+    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">3. Scheduling</div>
+    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color:#fff; text-align:center; line-height:40px;">4. Scoring</div>
+    <div style="color:#979797; text-align:center; line-height:40px;">5. Summary</div>
+  </div>
+  <br>
+  <h4 style="color:#979797">Step Four</h4>
+  <h2>Series Scoring</h2>
+  <h4 id="seriesHeader" style="color:#979797">Configure discard thresholds for low point scoring.</h4>
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <div class="row">
+      <span class="pill">Low Point (fixed)</span>
+      <button id="addDiscardRuleBtn" class="btn secondary">Add Discard Rule</button>
+      <button id="saveScoringBtn" class="btn">Save Scoring</button>
+      <span id="status" class="muted"></span>
+    </div>
+    <div id="loadedState" class="info-banner">Loading current scoring for this series...</div>
+    <div class="muted" style="margin-top:8px;">Define thresholds: discard 1 after X races, discard 2 after Y races, etc.</div>
+    <table class="mini-table">
+      <thead><tr><th>Rule</th><th>After X Races</th><th>Action</th></tr></thead>
+      <tbody id="discardRulesBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
+  <button class="blue-button" id="backBtn">Back</button>
+  <button class="blue-button" id="nextBtn">> Continue to Summary</button>
+</div>
+
+<script>
+let selectedSeriesId = null;
+let discardRules = [];
+let scoringDirty = false;
+let _navigatingAway = false;
+
+const _beforeUnloadHandler = (e)=>{
+  if(!scoringDirty || _navigatingAway) return;
+  e.preventDefault();
+  e.returnValue = '';
+};
+
+function getSeriesId(){ return new URLSearchParams(window.location.search).get('series_id') || document.body.dataset.currentSeriesId || null; }
+
+function setLoadedState(message){
+  document.getElementById('loadedState').textContent = message;
+}
+
+async function loadSeriesHeader(){
+  const res = await fetch(`/api/series/manage/${selectedSeriesId}`, { cache:'no-store' });
+  const data = await res.json().catch(()=>({}));
+  if(res.ok && data.ok && data.series){ document.getElementById('seriesHeader').textContent = `${data.series.name} (${data.series.year})`; }
+  else if(res.status === 404){ await fetch('/api/series/manage/setup/clear',{method:'POST'}).catch(()=>{}); window.location.href='/series/new/start'; }
+}
+
+function renderDiscardRules(){
+  const tbody=document.getElementById('discardRulesBody'); tbody.innerHTML='';
+  discardRules.forEach((r,idx)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>Discard ${r.discard_count}</td><td><input class="small-input" type="number" min="1" value="${r.after_races}" onchange="updateDiscardAfter(${idx}, this.value)"></td><td><button class="btn secondary" onclick="removeDiscardRule(${idx})">Remove</button></td>`;
+    tbody.appendChild(tr);
+  });
+  if(!tbody.children.length){ const tr=document.createElement('tr'); tr.innerHTML='<td colspan="3" style="color:#888;">No discard rules configured.</td>'; tbody.appendChild(tr); }
+}
+
+function addDiscardRule(){
+  const next = discardRules.length + 1;
+  const after = discardRules.length ? Number(discardRules[discardRules.length-1].after_races)+1 : 2;
+  discardRules.push({ discard_count: next, after_races: after });
+  scoringDirty = true;
+  renderDiscardRules();
+}
+
+function removeDiscardRule(idx){
+  discardRules.splice(idx,1);
+  discardRules = discardRules.map((r,i)=>({ discard_count:i+1, after_races:Number(r.after_races) }));
+  scoringDirty = true;
+  renderDiscardRules();
+}
+
+function updateDiscardAfter(idx,val){ discardRules[idx].after_races = Number(val||0); scoringDirty = true; }
+
+async function loadScoring(){
+  const res=await fetch(`/api/series/manage/${selectedSeriesId}/scoring`,{cache:'no-store'});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok||!data.ok) throw new Error(data.error||'Failed to load scoring');
+  const s=data.scoring||{};
+  discardRules = Array.isArray(s.discard_rules) ? s.discard_rules.map(r=>({discard_count:Number(r.discard_count), after_races:Number(r.after_races)})) : [];
+  renderDiscardRules();
+  if(discardRules.length){
+    setLoadedState(`Loaded ${discardRules.length} saved discard rule${discardRules.length === 1 ? '' : 's'} for this series.`);
+  } else {
+    setLoadedState('No saved discard rules yet. Add scoring rules for this series below.');
+  }
+}
+
+async function saveScoring(){
+  const payload={ discard_rules: discardRules.map((r,i)=>({ discard_count:i+1, after_races:Number(r.after_races) })) };
+  if(payload.discard_rules.some(r=>!Number.isInteger(r.after_races)||r.after_races<1)){
+    alert('Each discard rule must have after_races >= 1');
+    return false;
+  }
+  const res=await fetch(`/api/series/manage/${selectedSeriesId}/scoring`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok||!data.ok){
+    alert(data.error||'Failed to save scoring');
+    return false;
+  }
+  scoringDirty = false;
+  document.getElementById('status').textContent='Scoring saved.';
+  setLoadedState(`Loaded ${payload.discard_rules.length} saved discard rule${payload.discard_rules.length === 1 ? '' : 's'} for this series.`);
+  return true;
+}
+
+async function continueToSummary(){
+  const ok = await saveScoring();
+  if(!ok) return;
+  window.location.href=`/series/new/summary?series_id=${selectedSeriesId}`;
+}
+
+(async function init(){
+  selectedSeriesId=getSeriesId();
+  if(!selectedSeriesId){ window.location.href='/series/new/name'; return; }
+  document.getElementById('backBtn').addEventListener('click',()=>{
+    if(scoringDirty && !confirm('You have unsaved scoring changes. Leave without saving?')) return;
+    _navigatingAway = true;
+    window.location.href=`/series/new/schedule?series_id=${selectedSeriesId}`;
+  });
+  document.getElementById('nextBtn').addEventListener('click',()=>{
+    _navigatingAway = true;
+    continueToSummary();
+  });
+  document.getElementById('addDiscardRuleBtn').addEventListener('click',addDiscardRule);
+  document.getElementById('saveScoringBtn').addEventListener('click',saveScoring);
+  window.addEventListener('beforeunload', _beforeUnloadHandler);
+  try { await Promise.all([loadSeriesHeader(), loadScoring()]); } catch(e){ alert(e.message||'Failed to load scoring'); }
+})();
+</script>
+</body>
+</html>

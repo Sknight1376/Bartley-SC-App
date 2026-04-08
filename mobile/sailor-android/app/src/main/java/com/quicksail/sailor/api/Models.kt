@@ -157,3 +157,134 @@ data class RaceResultsResponse(
     val my_results: List<MyRaceResult> = emptyList(),
     val leaderboard: List<LeaderboardRow> = emptyList()
 )
+
+data class RaceControlRace(
+    val race_id: Long,
+    val series_id: Long,
+    val race_no: Int,
+    val started_at: String?,
+    val status: String,
+    val series_name: String
+)
+
+data class RaceControlRacesResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val races: List<RaceControlRace> = emptyList()
+)
+
+data class RaceControlEntry(
+    val entry_id: Long,
+    val sailor: String,
+    val boat: String,
+    val sail_number: String,
+    val handicap: Int?,
+    val finished: Boolean = false
+)
+
+data class RaceControlMeta(
+    val key: Long,
+    val race_no: Int,
+    val status: String,
+    val started_at: String?
+)
+
+data class RaceControlEntriesResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val race: RaceControlMeta? = null,
+    val entries: List<RaceControlEntry> = emptyList()
+)
+
+data class RaceControlStartResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val race_id: Long? = null
+)
+
+data class RaceControlLapRequest(
+    val entry_id: Long,
+    val lap_number: Int,
+    val elapsed_time: String,
+    val corrected_time: String?,
+    val position: Int?,
+    val is_finish: Boolean = false
+)
+
+data class RaceSummaryRaceInfo(
+    val race_no: Int,
+    val club_name: String,
+    val series_name: String,
+    val started_at: String?,
+    val date: String?,
+    val duration: String?
+)
+
+data class RaceSummaryResultRow(
+    val entry_id: Long,
+    val sailor: String,
+    val boat: String,
+    val sail_number: String,
+    val handicap: Int?,
+    val lap_count: Int,
+    val elapsed_time: String?,
+    val corrected_time: String?,
+    val position: Int?,
+    val dnf: Boolean
+)
+
+data class RaceSummaryResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val race: RaceSummaryRaceInfo? = null,
+    val results: List<RaceSummaryResultRow> = emptyList()
+)
+
+data class DashboardLatestResult(
+    val race_id: Long,
+    val race_no: Int,
+    val series_name: String,
+    val started_at: String?,
+    val sailor: String,
+    val boat: String,
+    val sail_number: String,
+    val position: Int?,
+    val elapsed_time: String?,
+    val corrected_time: String?
+)
+
+data class DashboardSeriesPosition(
+    val series_id: Long,
+    val series_name: String,
+    val sailor_name: String,
+    val points: Int,
+    val races_completed: Int,
+    val rank: Int,
+    val sailors_count: Int
+)
+
+data class DashboardResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val upcoming_races: List<UpcomingRace> = emptyList(),
+    val completed_races: List<UpcomingRace> = emptyList(),
+    val latest_day_results: List<DashboardLatestResult> = emptyList(),
+    val latest_result: DashboardLatestResult? = null,
+    val series_positions: List<DashboardSeriesPosition> = emptyList()
+)
+
+data class SeriesStandingRow(
+    val series_id: Long,
+    val series_name: String,
+    val sailor_id: Long,
+    val sailor_name: String,
+    val points: Int,
+    val races_completed: Int,
+    val rank: Int
+)
+
+data class SeriesStandingsResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val standings: List<SeriesStandingRow> = emptyList()
+)

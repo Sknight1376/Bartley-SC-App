@@ -33,6 +33,47 @@ Use [\_reset_series_api_test.py](_reset_series_api_test.py) to clear old race da
 For one-click QA presets on Windows, run [reset_series_test.bat](reset_series_test.bat).
 It provides a menu for default reset, series-only reset, 3-race seed, custom args, and help.
 
+## Reconnect phone to backend (reusable)
+
+If the phone is unplugged/replugged, run [reconnect_phone_backend.bat](reconnect_phone_backend.bat).
+
+This will:
+- find `adb` (Windows PATH/SDK or WSL fallback),
+- reconnect `adb reverse tcp:5000 tcp:5000`,
+- show connected devices and reverse mappings,
+- call [app/app.py](app/app.py) health endpoint `GET /api/health`,
+- probe mobile API and explain common HTTP 500 cause (database unavailable).
+
+If probe output mentions `OperationalError` / `connection to server at "localhost"`, the phone tunnel is fine and PostgreSQL is down.
+
+Main script: [reconnect_phone_backend.ps1](reconnect_phone_backend.ps1)
+
+## Advanced series scheduling (overlapping/non-linear)
+
+New API endpoints support Lyme-style calendars with overlapping series and exceptions.
+
+- Add recurring rule: `POST /api/series/manage/{series_id}/rules`
+   - payload example:
+      - `weekday`: `"saturday"` (or `0..6`)
+      - `start_time`: `"11:00"`
+      - `cadence_weeks`: `1`
+      - `races_per_day`: `2`
+      - `slot_gap_minutes`: `15`
+      - `valid_from`: `"2026-04-01"`
+      - `valid_to`: `"2026-09-30"` (optional)
+
+- Add exception: `POST /api/series/manage/{series_id}/exceptions`
+   - `exception_type`: `cancel` | `move` | `add`
+   - `original_start_at` / `override_start_at` (ISO datetime as needed)
+
+- Generate concrete races from rules/exceptions:
+   - `POST /api/series/manage/{series_id}/generate`
+   - payload: `{ "from_date": "2026-04-01", "to_date": "2026-10-31" }`
+
+List configured data:
+- `GET /api/series/manage/{series_id}/rules`
+- `GET /api/series/manage/{series_id}/exceptions`
+
 Examples:
 
 - Default reset for `Series_API_Test` (club-wide cleanup):

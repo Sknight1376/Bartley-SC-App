@@ -1,7 +1,7 @@
 from flask import Flask, render_template, jsonify, request, session, redirect
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, date
 
 
 
@@ -14,6 +14,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://dwh:DBTTEST@localhost:5432
 app.app_context().push()
 db = SQLAlchemy(app)
 app.secret_key = "4001376"
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 db.Model.metadata.reflect(db.engine, schema='RACINGAPP')
 
 class Boats(db.Model):
@@ -54,6 +55,7 @@ def parse_hms_to_seconds(s: str):
 
 
 def set_mobile_session(sailor_user_id, sailor_id, username, club_id):
+    session.permanent = True          # cookie lives for PERMANENT_SESSION_LIFETIME (24 h)
     session["sailor_user_id"] = str(sailor_user_id)
     session["sailor_id"] = str(sailor_id)
     session["sailor_username"] = username
@@ -63,12 +65,389 @@ def set_mobile_session(sailor_user_id, sailor_id, username, club_id):
         session["sailor_club_id"] = str(club_id)
 
 
+def ensure_series_schedule_tables(conn):
+    conn.execute(text('''
+        CREATE TABLE IF NOT EXISTS "RACINGAPP"."SERIES_RULE" (
+            key BIGINT PRIMARY KEY DEFAULT nextval('key'),
+            series BIGINT NOT NULL REFERENCES "RACINGAPP"."SERIESCONTROL"(key) ON DELETE CASCADE,
+            weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+            start_time TIME NOT NULL,
+            cadence_weeks INTEGER NOT NULL DEFAULT 1 CHECK (cadence_weeks > 0),
+            races_per_day INTEGER NOT NULL DEFAULT 1 CHECK (races_per_day > 0),
+            target_race_count INTEGER NULL,
+            extra_start_times TEXT NULL,
+            slot_gap_minutes INTEGER NOT NULL DEFAULT 10 CHECK (slot_gap_minutes > 0),
+            valid_from DATE NOT NULL,
+            valid_to DATE NULL,
+            anchor_date DATE NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+
+    conn.execute(text('''
+        CREATE TABLE IF NOT EXISTS "RACINGAPP"."SERIES_EXCEPTION" (
+            key BIGINT PRIMARY KEY DEFAULT nextval('key'),
+            series BIGINT NOT NULL REFERENCES "RACINGAPP"."SERIESCONTROL"(key) ON DELETE CASCADE,
+            exception_type VARCHAR(16) NOT NULL CHECK (exception_type IN ('cancel', 'move', 'add')),
+            exception_date DATE NULL,
+            original_start_at TIMESTAMP NULL,
+            override_start_at TIMESTAMP NULL,
+            note TEXT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+
+    conn.execute(text('''
+        CREATE TABLE IF NOT EXISTS "RACINGAPP"."SERIES_SCORING" (
+            series BIGINT PRIMARY KEY REFERENCES "RACINGAPP"."SERIESCONTROL"(key) ON DELETE CASCADE,
+            scoring_system VARCHAR(32) NOT NULL DEFAULT 'low_point',
+            races_to_count INTEGER NULL,
+            discard_after_races INTEGER NULL,
+            discards_allowed INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+
+    conn.execute(text('''
+        CREATE TABLE IF NOT EXISTS "RACINGAPP"."SERIES_SCORING_DISCARD" (
+            key BIGINT PRIMARY KEY DEFAULT nextval('key'),
+            series BIGINT NOT NULL REFERENCES "RACINGAPP"."SERIESCONTROL"(key) ON DELETE CASCADE,
+            discard_count INTEGER NOT NULL CHECK (discard_count > 0),
+            after_races INTEGER NOT NULL CHECK (after_races > 0),
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(series, discard_count)
+        )
+    '''))
+
+    conn.execute(text('''
+        ALTER TABLE "RACINGAPP"."SERIES_RULE"
+        ADD COLUMN IF NOT EXISTS extra_start_times TEXT NULL
+    '''))
+    conn.execute(text('''
+        ALTER TABLE "RACINGAPP"."SERIES_RULE"
+        ADD COLUMN IF NOT EXISTS target_race_count INTEGER NULL
+    '''))
+    conn.execute(text('''
+        ALTER TABLE "RACINGAPP"."SERIES_EXCEPTION"
+        ADD COLUMN IF NOT EXISTS exception_date DATE NULL
+    '''))
+
+    conn.execute(text('''
+        CREATE INDEX IF NOT EXISTS idx_series_rule_series
+            ON "RACINGAPP"."SERIES_RULE" (series)
+    '''))
+    conn.execute(text('''
+        CREATE INDEX IF NOT EXISTS idx_series_exception_series
+            ON "RACINGAPP"."SERIES_EXCEPTION" (series)
+    '''))
+    conn.execute(text('''
+        CREATE INDEX IF NOT EXISTS idx_series_scoring_discard_series
+            ON "RACINGAPP"."SERIES_SCORING_DISCARD" (series)
+    '''))
+    conn.execute(text('''
+        CREATE INDEX IF NOT EXISTS idx_race_series_started
+            ON "RACINGAPP"."RACE" (series, started_at)
+    '''))
+
+
+def parse_date_yyyy_mm_dd(value, field_name):
+    try:
+        return datetime.strptime((value or "").strip(), "%Y-%m-%d").date()
+    except Exception:
+        raise ValueError(f"{field_name} must be YYYY-MM-DD")
+
+
+def parse_time_hh_mm(value, field_name):
+    raw = (value or "").strip()
+    try:
+        return datetime.strptime(raw, "%H:%M").time()
+    except Exception:
+        raise ValueError(f"{field_name} must be HH:MM (24h)")
+
+
+def parse_time_list_hh_mm(value, field_name):
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        raw_text = str(value).strip()
+        if not raw_text:
+            return []
+        raw_items = raw_text.split(',')
+
+    parsed = []
+    for idx, item in enumerate(raw_items):
+        t = parse_time_hh_mm(str(item).strip(), f"{field_name}[{idx}]")
+        parsed.append(t)
+    return parsed
+
+
+def parse_iso_datetime(value, field_name):
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1]
+    try:
+        return datetime.fromisoformat(raw)
+    except Exception:
+        raise ValueError(f"{field_name} must be ISO datetime")
+
+
+def parse_weekday(value):
+    if isinstance(value, int):
+        if 0 <= value <= 6:
+            return value
+        raise ValueError("weekday must be between 0 and 6")
+
+    raw = (value or "").strip().lower()
+    weekday_map = {
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
+        "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6
+    }
+    if raw in weekday_map:
+        return weekday_map[raw]
+    raise ValueError("weekday must be 0..6 or weekday name")
+
+
+def calculate_rule_end_date(valid_from, weekday, cadence_weeks, races_per_day, target_race_count):
+    if target_race_count is None or target_race_count <= 0:
+        return None
+
+    days_to_add = (weekday - valid_from.weekday()) % 7
+    current = valid_from + timedelta(days=days_to_add)
+    remaining = int(target_race_count)
+
+    while True:
+        remaining -= min(races_per_day, remaining)
+        if remaining <= 0:
+            return current
+        current = current + timedelta(days=7 * cadence_weeks)
+
+
+def calculate_rule_end_date_with_exceptions(valid_from, weekday, cadence_weeks, races_per_day, target_race_count, excluded_dates):
+    if target_race_count is None or target_race_count <= 0:
+        return None
+
+    excluded_set = set(excluded_dates or [])
+    days_to_add = (weekday - valid_from.weekday()) % 7
+    current = valid_from + timedelta(days=days_to_add)
+    remaining = int(target_race_count)
+
+    while True:
+        if current not in excluded_set:
+            remaining -= min(races_per_day, remaining)
+            if remaining <= 0:
+                return current
+        current = current + timedelta(days=7 * cadence_weeks)
+
+
+def recompute_series_rule_end_dates(conn, series_id):
+    rules = conn.execute(
+        text('''
+            SELECT key, weekday, cadence_weeks, races_per_day, target_race_count, valid_from
+            FROM "RACINGAPP"."SERIES_RULE"
+            WHERE series = :series_id
+              AND is_active = TRUE
+              AND target_race_count IS NOT NULL
+              AND target_race_count > 0
+        '''),
+        {"series_id": series_id}
+    ).mappings().all()
+
+    exception_rows = conn.execute(
+        text('''
+            SELECT COALESCE(exception_date, DATE(original_start_at)) AS exception_date
+            FROM "RACINGAPP"."SERIES_EXCEPTION"
+            WHERE series = :series_id
+              AND is_active = TRUE
+              AND exception_type = 'cancel'
+        '''),
+        {"series_id": series_id}
+    ).mappings().all()
+
+    excluded_dates = [r["exception_date"] for r in exception_rows if r.get("exception_date")]
+
+    for rule in rules:
+        new_valid_to = calculate_rule_end_date_with_exceptions(
+            valid_from=rule["valid_from"],
+            weekday=int(rule["weekday"]),
+            cadence_weeks=int(rule["cadence_weeks"]),
+            races_per_day=int(rule["races_per_day"]),
+            target_race_count=int(rule["target_race_count"]),
+            excluded_dates=excluded_dates,
+        )
+        if new_valid_to:
+            conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."SERIES_RULE"
+                    SET valid_to = :valid_to,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE key = :rule_id
+                '''),
+                {"valid_to": new_valid_to, "rule_id": rule["key"]}
+            )
+
+
+def check_series_access(conn, series_id, club_id):
+    return conn.execute(
+        text('''
+            SELECT 1
+            FROM "RACINGAPP"."SERIESCONTROL"
+            WHERE key = :series_id
+              AND club = :club_id
+            LIMIT 1
+        '''),
+        {"series_id": series_id, "club_id": club_id}
+    ).scalar()
+
+
+def generate_series_races(conn, series_id, club_id, from_date, to_date):
+    ensure_series_schedule_tables(conn)
+
+    rules = conn.execute(
+        text('''
+             SELECT key, weekday, start_time, cadence_weeks, races_per_day,
+                 extra_start_times, slot_gap_minutes, valid_from, valid_to
+            FROM "RACINGAPP"."SERIES_RULE"
+            WHERE series = :series_id
+              AND is_active = TRUE
+              AND valid_from <= :to_date
+              AND (valid_to IS NULL OR valid_to >= :from_date)
+            ORDER BY key ASC
+        '''),
+        {"series_id": series_id, "from_date": from_date, "to_date": to_date}
+    ).mappings().all()
+
+    exceptions = conn.execute(
+        text('''
+                        SELECT exception_type, exception_date, original_start_at
+            FROM "RACINGAPP"."SERIES_EXCEPTION"
+            WHERE series = :series_id
+              AND is_active = TRUE
+            ORDER BY key ASC
+        '''),
+        {"series_id": series_id}
+    ).mappings().all()
+
+    planned = {}
+
+    for rule in rules:
+        weekday = int(rule["weekday"])
+        cadence = int(rule["cadence_weeks"])
+        races_per_day = int(rule["races_per_day"])
+        start_time = rule["start_time"]
+        cadence_anchor = rule["valid_from"]
+        rule_start = max(rule["valid_from"], from_date)
+        rule_end = min(rule["valid_to"] or to_date, to_date)
+        extra_start_times = [s.strip() for s in (rule.get("extra_start_times") or "").split(",") if s and s.strip()]
+        slot_gap = int(rule["slot_gap_minutes"])
+
+        day_start_times = [start_time]
+        if races_per_day > 1:
+            if len(extra_start_times) >= races_per_day - 1:
+                day_start_times.extend([
+                    datetime.strptime(t, "%H:%M").time()
+                    for t in extra_start_times[:races_per_day - 1]
+                ])
+            else:
+                day_start_times.extend([
+                    (datetime.combine(date.today(), start_time) + timedelta(minutes=slot_gap * slot)).time()
+                    for slot in range(1, races_per_day)
+                ])
+
+        if rule_start > rule_end:
+            continue
+
+        first = rule_start + timedelta(days=(weekday - rule_start.weekday()) % 7)
+        while ((first - cadence_anchor).days // 7) % cadence != 0:
+            first = first + timedelta(days=7)
+
+        current = first
+        while current <= rule_end:
+            for slot in range(races_per_day):
+                started_at = datetime.combine(current, day_start_times[slot])
+                planned[started_at] = True
+            current = current + timedelta(days=7 * cadence)
+
+    excluded_dates = set()
+    for ex in exceptions:
+        ex_date = ex["exception_date"]
+        if not ex_date and ex.get("exception_type") == "cancel" and ex.get("original_start_at"):
+            ex_date = ex["original_start_at"].date()
+        if ex_date and from_date <= ex_date <= to_date:
+            excluded_dates.add(ex_date)
+
+    if excluded_dates:
+        for dt_key in list(planned.keys()):
+            if dt_key.date() in excluded_dates:
+                planned.pop(dt_key, None)
+
+    max_race_no = conn.execute(
+        text('SELECT COALESCE(MAX(race_no), 0) FROM "RACINGAPP"."RACE" WHERE series = :series_id'),
+        {"series_id": series_id}
+    ).scalar() or 0
+
+    inserted = 0
+    skipped = 0
+    for started_at in sorted(planned.keys()):
+        exists = conn.execute(
+            text('''
+                SELECT 1
+                FROM "RACINGAPP"."RACE"
+                WHERE series = :series_id
+                  AND started_at = :started_at
+                LIMIT 1
+            '''),
+            {"series_id": series_id, "started_at": started_at}
+        ).scalar()
+        if exists:
+            skipped += 1
+            continue
+
+        max_race_no += 1
+        conn.execute(
+            text('''
+                INSERT INTO "RACINGAPP"."RACE" (key, club, series, race_no, status, started_at, ended_at)
+                VALUES (nextval('key'), :club, :series, :race_no, 'not_started', :started_at, NULL)
+            '''),
+            {"club": club_id, "series": series_id, "race_no": max_race_no, "started_at": started_at}
+        )
+        inserted += 1
+
+    return {
+        "rule_count": len(rules),
+        "planned_count": len(planned),
+        "inserted_count": inserted,
+        "skipped_count": skipped,
+    }
+
+
 
 # ---------- routes ----------
 
 @app.route("/")
 def intro_page():
     return render_template("intro.html")
+
+
+@app.get("/api/health")
+@app.get("/api/mobile/health")
+def api_health():
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return jsonify({"ok": True, "status": "healthy"})
+    except Exception as e:
+        return jsonify({"ok": False, "status": "unhealthy", "error": str(e)}), 500
 
 
 @app.get("/login")
@@ -618,7 +997,7 @@ def api_mobile_upcoming_races():
                     WHERE r.club = :club_id
                                             AND r.status IN ('not_started', 'active')
                                             AND r.started_at IS NOT NULL
-                                            AND r.started_at < (NOW() + INTERVAL '7 day')
+                                            AND r.started_at < (NOW() + INTERVAL '5 day')
                                             AND (r.status = 'active' OR r.started_at >= NOW())
                                         ORDER BY r.started_at ASC, r.key ASC
                 '''),
@@ -626,6 +1005,300 @@ def api_mobile_upcoming_races():
             ).mappings().all()
 
         return jsonify({"ok": True, "races": [dict(r) for r in races]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/mobile/dashboard")
+def api_mobile_dashboard():
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            if not club_id:
+                club_id = conn.execute(
+                    text('''
+                        SELECT club
+                        FROM "RACINGAPP"."SAILORCONTROL"
+                        WHERE key = :sailor_id
+                        LIMIT 1
+                    '''),
+                    {"sailor_id": sailor_id}
+                ).scalar()
+                if club_id:
+                    session["sailor_club_id"] = str(club_id)
+
+            if not club_id:
+                return jsonify({
+                    "ok": True,
+                    "upcoming_races": [],
+                    "completed_races": [],
+                    "latest_result": None,
+                    "series_positions": []
+                })
+
+            upcoming = conn.execute(
+                text('''
+                    SELECT r.key AS race_id,
+                           r.race_no,
+                           r.status,
+                           r.started_at,
+                           sc.name AS series_name,
+                           CASE WHEN EXISTS (
+                               SELECT 1
+                               FROM "RACINGAPP"."RACE_ENTRY" re
+                               JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
+                               WHERE re.race_id = r.key
+                                 AND bc.sailor = :sailor_id
+                           ) THEN TRUE ELSE FALSE END AS joined,
+                           CASE WHEN r.status = 'finished' OR EXISTS (
+                               SELECT 1
+                               FROM "RACINGAPP"."RACE_ENTRY" re2
+                               JOIN "RACINGAPP"."BOATCONTROL" bc2 ON bc2.key = re2.boatkey
+                               JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re2.key
+                               WHERE re2.race_id = r.key
+                                 AND bc2.sailor = :sailor_id
+                           ) THEN TRUE ELSE FALSE END AS results_available
+                    FROM "RACINGAPP"."RACE" r
+                    JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+                    WHERE r.club = :club_id
+                      AND r.status IN ('not_started', 'active')
+                                            AND r.started_at IS NOT NULL
+                                            AND r.started_at < (NOW() + INTERVAL '5 day')
+                                            AND (r.status = 'active' OR r.started_at >= NOW())
+                                        ORDER BY
+                                                CASE WHEN r.status = 'active' THEN 0 ELSE 1 END,
+                                                r.started_at ASC NULLS LAST,
+                                                r.key ASC
+                '''),
+                {"club_id": club_id, "sailor_id": sailor_id}
+            ).mappings().all()
+
+            completed = conn.execute(
+                text('''
+                    SELECT r.key AS race_id,
+                           r.race_no,
+                           r.status,
+                           r.started_at,
+                           sc.name AS series_name,
+                           TRUE AS joined,
+                           TRUE AS results_available
+                    FROM "RACINGAPP"."RACE" r
+                    JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+                    JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
+                    JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
+                    WHERE r.club = :club_id
+                      AND bc.sailor = :sailor_id
+                      AND r.status = 'finished'
+                    GROUP BY r.key, r.race_no, r.status, r.started_at, sc.name
+                    ORDER BY COALESCE(r.ended_at, r.started_at) DESC NULLS LAST, r.key DESC
+                    LIMIT 10
+                '''),
+                {"club_id": club_id, "sailor_id": sailor_id}
+            ).mappings().all()
+
+            def secs_to_hms(s):
+                if s is None:
+                    return None
+                s = int(s)
+                return f"{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}"
+
+            latest_result_day = conn.execute(
+                text('''
+                    SELECT DATE(MAX(COALESCE(r.ended_at, r.started_at))) AS latest_day
+                    FROM "RACINGAPP"."RACE" r
+                    JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
+                    JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
+                    WHERE r.club = :club_id
+                      AND bc.sailor = :sailor_id
+                      AND EXISTS (
+                          SELECT 1
+                          FROM "RACINGAPP"."LAP" l
+                          WHERE l.race_entry_id = re.key
+                            AND l.is_finish = TRUE
+                      )
+                '''),
+                {"club_id": club_id, "sailor_id": sailor_id}
+            ).scalar()
+
+            latest_day_results = []
+            if latest_result_day is not None:
+                latest_rows = conn.execute(
+                    text('''
+                        SELECT r.key AS race_id,
+                               r.race_no,
+                               r.started_at,
+                               sc.name AS series_name,
+                               re.sailor,
+                               re.boat,
+                               re.sail_number,
+                               MAX(CASE WHEN l.is_finish THEN l.position END) AS position,
+                               MAX(CASE WHEN l.is_finish THEN l.elapsed_sec END) AS elapsed_sec,
+                               MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS corrected_sec
+                        FROM "RACINGAPP"."RACE" r
+                        JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+                        JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
+                        JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
+                        LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
+                        WHERE r.club = :club_id
+                          AND bc.sailor = :sailor_id
+                          AND DATE(COALESCE(r.ended_at, r.started_at)) = :latest_day
+                          AND EXISTS (
+                              SELECT 1
+                              FROM "RACINGAPP"."LAP" l2
+                              WHERE l2.race_entry_id = re.key
+                                AND l2.is_finish = TRUE
+                          )
+                        GROUP BY r.key, r.race_no, r.started_at, sc.name, re.key, re.sailor, re.boat, re.sail_number
+                        ORDER BY r.race_no ASC, position ASC NULLS LAST, corrected_sec ASC NULLS LAST
+                    '''),
+                    {"club_id": club_id, "sailor_id": sailor_id, "latest_day": latest_result_day}
+                ).mappings().all()
+
+                latest_day_results = [
+                    {
+                        "race_id": row["race_id"],
+                        "race_no": row["race_no"],
+                        "series_name": row["series_name"],
+                        "started_at": row["started_at"],
+                        "sailor": row["sailor"],
+                        "boat": row["boat"],
+                        "sail_number": row["sail_number"],
+                        "position": row["position"],
+                        "elapsed_time": secs_to_hms(row["elapsed_sec"]),
+                        "corrected_time": secs_to_hms(row["corrected_sec"])
+                    }
+                    for row in latest_rows
+                ]
+
+            latest_result = latest_day_results[0] if latest_day_results else None
+
+            positions = conn.execute(
+                text('''
+                    WITH sailor_results AS (
+                        SELECT r.series AS series_id,
+                               sc.name AS series_name,
+                               bc.sailor AS sailor_id,
+                               re.sailor AS sailor_name,
+                               MAX(CASE WHEN l.is_finish THEN l.position END) AS finish_pos
+                        FROM "RACINGAPP"."RACE" r
+                        JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+                        JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
+                        JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
+                        LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
+                        WHERE r.club = :club_id
+                        GROUP BY r.series, sc.name, bc.sailor, re.sailor, re.key
+                    ),
+                    points AS (
+                        SELECT series_id,
+                               series_name,
+                               sailor_id,
+                               sailor_name,
+                               SUM(CASE WHEN finish_pos IS NULL THEN 9999 ELSE finish_pos END) AS points,
+                               COUNT(*) FILTER (WHERE finish_pos IS NOT NULL) AS races_completed
+                        FROM sailor_results
+                        GROUP BY series_id, series_name, sailor_id, sailor_name
+                    ),
+                    ranked AS (
+                        SELECT *,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY series_id
+                                   ORDER BY points ASC, races_completed DESC, sailor_name ASC
+                               ) AS rank,
+                               COUNT(*) OVER (PARTITION BY series_id) AS sailors_count
+                        FROM points
+                    )
+                    SELECT series_id, series_name, sailor_name, points, races_completed, rank, sailors_count
+                    FROM ranked
+                    WHERE sailor_id = :sailor_id
+                    ORDER BY series_name ASC
+                '''),
+                {"club_id": club_id, "sailor_id": sailor_id}
+            ).mappings().all()
+
+        return jsonify({
+            "ok": True,
+            "upcoming_races": [dict(r) for r in upcoming],
+            "completed_races": [dict(r) for r in completed],
+            "latest_day_results": latest_day_results,
+            "latest_result": latest_result,
+            "series_positions": [dict(r) for r in positions]
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/mobile/series/standings")
+def api_mobile_series_standings():
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            if not club_id:
+                club_id = conn.execute(
+                    text('''
+                        SELECT club
+                        FROM "RACINGAPP"."SAILORCONTROL"
+                        WHERE key = :sailor_id
+                        LIMIT 1
+                    '''),
+                    {"sailor_id": sailor_id}
+                ).scalar()
+                if club_id:
+                    session["sailor_club_id"] = str(club_id)
+
+            if not club_id:
+                return jsonify({"ok": True, "standings": []})
+
+            rows = conn.execute(
+                text('''
+                    WITH sailor_results AS (
+                        SELECT r.series AS series_id,
+                               sc.name AS series_name,
+                               bc.sailor AS sailor_id,
+                               re.sailor AS sailor_name,
+                               MAX(CASE WHEN l.is_finish THEN l.position END) AS finish_pos
+                        FROM "RACINGAPP"."RACE" r
+                        JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+                        JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
+                        JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
+                        LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
+                        WHERE r.club = :club_id
+                        GROUP BY r.series, sc.name, bc.sailor, re.sailor, re.key
+                    ),
+                    points AS (
+                        SELECT series_id,
+                               series_name,
+                               sailor_id,
+                               sailor_name,
+                               SUM(CASE WHEN finish_pos IS NULL THEN 9999 ELSE finish_pos END) AS points,
+                               COUNT(*) FILTER (WHERE finish_pos IS NOT NULL) AS races_completed
+                        FROM sailor_results
+                        GROUP BY series_id, series_name, sailor_id, sailor_name
+                    )
+                    SELECT series_id,
+                           series_name,
+                           sailor_id,
+                           sailor_name,
+                           points,
+                           races_completed,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY series_id
+                               ORDER BY points ASC, races_completed DESC, sailor_name ASC
+                           ) AS rank
+                    FROM points
+                    ORDER BY series_name ASC, rank ASC
+                '''),
+                {"club_id": club_id}
+            ).mappings().all()
+
+        return jsonify({"ok": True, "standings": [dict(r) for r in rows]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -796,6 +1469,318 @@ def api_mobile_race_results(race_id):
                 for r in leaderboard
             ]
         })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/mobile/races/control/upcoming")
+def api_mobile_control_upcoming_races():
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            if not club_id:
+                club_id = conn.execute(
+                    text('''
+                        SELECT club
+                        FROM "RACINGAPP"."SAILORCONTROL"
+                        WHERE key = :sailor_id
+                        LIMIT 1
+                    '''),
+                    {"sailor_id": sailor_id}
+                ).scalar()
+                if club_id:
+                    session["sailor_club_id"] = str(club_id)
+
+            if not club_id:
+                return jsonify({"ok": True, "races": []})
+
+            rows = conn.execute(
+                text('''
+                    SELECT race_id, series_id, race_no, started_at, status, series_name
+                    FROM (
+                        SELECT r.key AS race_id,
+                               r.series AS series_id,
+                               r.race_no,
+                               r.started_at,
+                               r.status,
+                               sc.name AS series_name
+                        FROM "RACINGAPP"."RACE" r
+                        JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+                        WHERE r.club = :club_id
+                          AND r.status IN ('not_started', 'active')
+                    ) x
+                    ORDER BY
+                        CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+                        started_at ASC NULLS LAST,
+                        race_id ASC
+                '''),
+                {"club_id": club_id}
+            ).mappings().all()
+
+        return jsonify({"ok": True, "races": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/mobile/races/<int:race_id>/control-entries")
+def api_mobile_control_entries(race_id):
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id or not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            race_row = conn.execute(
+                text('''
+                    SELECT key, race_no, status, started_at
+                    FROM "RACINGAPP"."RACE"
+                    WHERE key = :race_id
+                      AND club = :club_id
+                    LIMIT 1
+                '''),
+                {"race_id": race_id, "club_id": club_id}
+            ).mappings().first()
+
+            if not race_row:
+                return jsonify({"ok": False, "error": "Race not found"}), 404
+
+            rows = conn.execute(
+                text('''
+                    SELECT re.key AS entry_id,
+                           re.sailor,
+                           re.boat,
+                           re.sail_number,
+                           re.handicap,
+                           CASE WHEN EXISTS (
+                               SELECT 1 FROM "RACINGAPP"."LAP" l
+                               WHERE l.race_entry_id = re.key
+                                 AND l.is_finish = TRUE
+                           ) THEN TRUE ELSE FALSE END AS finished
+                    FROM "RACINGAPP"."RACE_ENTRY" re
+                    WHERE re.race_id = :race_id
+                    ORDER BY re.key ASC
+                '''),
+                {"race_id": race_id}
+            ).mappings().all()
+
+        return jsonify({
+            "ok": True,
+            "race": dict(race_row),
+            "entries": [dict(r) for r in rows]
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/mobile/races/<int:race_id>/control-start")
+def api_mobile_control_start(race_id):
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id or not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.begin() as conn:
+            race_row = conn.execute(
+                text('''
+                    SELECT key, status
+                    FROM "RACINGAPP"."RACE"
+                    WHERE key = :race_id
+                      AND club = :club_id
+                    LIMIT 1
+                '''),
+                {"race_id": race_id, "club_id": club_id}
+            ).mappings().first()
+
+            if not race_row:
+                return jsonify({"ok": False, "error": "Race not found"}), 404
+            if race_row["status"] == "finished":
+                return jsonify({"ok": False, "error": "Race already finished"}), 409
+
+            conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."RACE"
+                    SET status = 'active',
+                        started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
+                    WHERE key = :race_id
+                '''),
+                {"race_id": race_id}
+            )
+
+        return jsonify({"ok": True, "race_id": race_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/mobile/races/<int:race_id>/control-lap")
+def api_mobile_control_lap(race_id):
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id or not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    entry_id = payload.get("entry_id")
+    lap_number = payload.get("lap_number")
+    elapsed_time = payload.get("elapsed_time")
+    corrected_time = payload.get("corrected_time")
+    position = payload.get("position")
+    is_finish = bool(payload.get("is_finish", False))
+
+    if not all([entry_id, lap_number, elapsed_time]):
+        return jsonify({"ok": False, "error": "Missing required lap fields"}), 400
+
+    try:
+        elapsed_sec = parse_hms_to_seconds(elapsed_time)
+        corrected_sec = parse_hms_to_seconds(corrected_time) if corrected_time and corrected_time != "N/A" else None
+
+        with db.engine.begin() as conn:
+            race_exists = conn.execute(
+                text('SELECT 1 FROM "RACINGAPP"."RACE" WHERE key = :race_id AND club = :club_id'),
+                {"race_id": race_id, "club_id": club_id}
+            ).scalar()
+            if not race_exists:
+                return jsonify({"ok": False, "error": "Race not found"}), 404
+
+            entry_exists = conn.execute(
+                text('SELECT 1 FROM "RACINGAPP"."RACE_ENTRY" WHERE key = :entry_id AND race_id = :race_id'),
+                {"entry_id": entry_id, "race_id": race_id}
+            ).scalar()
+            if not entry_exists:
+                return jsonify({"ok": False, "error": "Race entry not found"}), 404
+
+            conn.execute(
+                text('''
+                    INSERT INTO "RACINGAPP"."LAP" (race_entry_id, lap_number, is_finish, elapsed_sec, corrected_sec, position)
+                    VALUES (:race_entry_id, :lap_number, :is_finish, :elapsed_sec, :corrected_sec, :position)
+                '''),
+                {
+                    "race_entry_id": entry_id,
+                    "lap_number": lap_number,
+                    "is_finish": is_finish,
+                    "elapsed_sec": elapsed_sec,
+                    "corrected_sec": corrected_sec,
+                    "position": position
+                }
+            )
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/mobile/races/<int:race_id>/control-finish")
+def api_mobile_control_finish(race_id):
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id or not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.begin() as conn:
+            updated = conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."RACE"
+                    SET status = :status,
+                        ended_at = CURRENT_TIMESTAMP
+                    WHERE key = :race_id
+                      AND club = :club_id
+                '''),
+                {"status": "finished", "race_id": race_id, "club_id": club_id}
+            )
+
+        if updated.rowcount == 0:
+            return jsonify({"ok": False, "error": "Race not found"}), 404
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/mobile/races/<int:race_id>/control-summary")
+def api_mobile_control_summary(race_id):
+    club_id = session.get("sailor_club_id")
+    sailor_id = session.get("sailor_id")
+    if not sailor_id or not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            race_row = conn.execute(
+                text('''
+                    SELECT r.race_no, r.started_at, r.ended_at, r.status,
+                           cc.name AS club_name, sc.name AS series_name
+                    FROM "RACINGAPP"."RACE" r
+                    JOIN "RACINGAPP"."CLUBCONTROL" cc ON r.club = cc.key
+                    JOIN "RACINGAPP"."SERIESCONTROL" sc ON r.series = sc.key
+                    WHERE r.key = :race_id
+                      AND r.club = :club_id
+                '''),
+                {"race_id": race_id, "club_id": club_id}
+            ).mappings().first()
+
+            if not race_row:
+                return jsonify({"ok": False, "error": "Race not found"}), 404
+
+            results_rows = conn.execute(
+                text('''
+                    SELECT re.key AS entry_id,
+                           re.sailor, re.boat, re.sail_number, re.handicap,
+                           COUNT(l.key) AS lap_count,
+                           MAX(CASE WHEN l.is_finish THEN l.elapsed_sec   END) AS final_elapsed_sec,
+                           MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS final_corrected_sec,
+                           MAX(CASE WHEN l.is_finish THEN l.position      END) AS final_position
+                    FROM "RACINGAPP"."RACE_ENTRY" re
+                    LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
+                    WHERE re.race_id = :race_id
+                    GROUP BY re.key, re.sailor, re.boat, re.sail_number, re.handicap
+                    ORDER BY MAX(CASE WHEN l.is_finish THEN l.position      END) ASC NULLS LAST,
+                             MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) ASC NULLS LAST
+                '''),
+                {"race_id": race_id}
+            ).mappings().all()
+
+        def secs_to_hms(s):
+            if s is None:
+                return None
+            s = int(s)
+            return f"{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}"
+
+        started_at = race_row["started_at"]
+        ended_at = race_row["ended_at"]
+        duration_sec = int((ended_at - started_at).total_seconds()) if started_at and ended_at else None
+
+        race_info = {
+            "race_no": race_row["race_no"],
+            "club_name": race_row["club_name"],
+            "series_name": race_row["series_name"],
+            "started_at": started_at.strftime("%H:%M:%S") if started_at else None,
+            "date": started_at.strftime("%d %B %Y") if started_at else None,
+            "duration": secs_to_hms(duration_sec),
+        }
+
+        results = [
+            {
+                "entry_id": row["entry_id"],
+                "sailor": row["sailor"],
+                "boat": row["boat"],
+                "sail_number": row["sail_number"],
+                "handicap": row["handicap"],
+                "lap_count": int(row["lap_count"]) if row["lap_count"] else 0,
+                "elapsed_time": secs_to_hms(row["final_elapsed_sec"]),
+                "corrected_time": secs_to_hms(row["final_corrected_sec"]),
+                "position": row["final_position"],
+                "dnf": row["final_position"] is None,
+            }
+            for row in results_rows
+        ]
+
+        return jsonify({"ok": True, "race": race_info, "results": results})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -1012,6 +1997,137 @@ def series_page():
     return render_template("series.html", clubName=session.get("club_name"))
 
 
+def get_active_series_setup_id():
+    query_series_id = request.args.get("series_id", type=int)
+    if query_series_id:
+        session["series_setup_id"] = query_series_id
+        return query_series_id
+
+    stored_series_id = session.get("series_setup_id")
+    try:
+        return int(stored_series_id) if stored_series_id is not None else None
+    except Exception:
+        session.pop("series_setup_id", None)
+        return None
+
+
+@app.get("/series/new")
+def series_new_page():
+    if not session.get("club_id"):
+        return redirect("/login")
+    return redirect("/series/new/start")
+
+
+@app.get("/series/new/start")
+def series_new_start_page():
+    if not session.get("club_id"):
+        return redirect("/login")
+    return render_template(
+        "series_new_start.html",
+        clubName=session.get("club_name"),
+        currentSeriesId=get_active_series_setup_id(),
+    )
+
+
+@app.post("/api/series/manage/setup/clear")
+def api_series_manage_setup_clear():
+    if not session.get("club_id"):
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    session.pop("series_setup_id", None)
+    return jsonify({"ok": True})
+
+
+@app.get("/series/new/name")
+def series_new_name_page():
+    if not session.get("club_id"):
+        return redirect("/login")
+    return render_template(
+        "series_new_name.html",
+        clubName=session.get("club_name"),
+        currentSeriesId=get_active_series_setup_id(),
+    )
+
+
+@app.get("/series/new/schedule")
+def series_new_schedule_page():
+    if not session.get("club_id"):
+        return redirect("/login")
+    return render_template(
+        "series_new_schedule.html",
+        clubName=session.get("club_name"),
+        currentSeriesId=get_active_series_setup_id(),
+    )
+
+
+@app.get("/series/new/scoring")
+def series_new_scoring_page():
+    if not session.get("club_id"):
+        return redirect("/login")
+    return render_template(
+        "series_new_scoring.html",
+        clubName=session.get("club_name"),
+        currentSeriesId=get_active_series_setup_id(),
+    )
+
+
+@app.get("/series/new/summary")
+def series_new_summary_page():
+    if not session.get("club_id"):
+        return redirect("/login")
+    return render_template(
+        "series_new_summary.html",
+        clubName=session.get("club_name"),
+        currentSeriesId=get_active_series_setup_id(),
+    )
+
+
+@app.post("/api/series/manage/basic")
+def api_series_manage_create_basic():
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    year = (payload.get("year") or "").strip() or str(date.today().year)
+    name = (payload.get("name") or "").strip()
+
+    if not name:
+        return jsonify({"ok": False, "error": "Series name is required"}), 400
+
+    try:
+        with db.engine.begin() as conn:
+            exists = conn.execute(
+                text('''
+                    SELECT key
+                    FROM "RACINGAPP"."SERIESCONTROL"
+                    WHERE club = :club_id
+                      AND LOWER(name) = LOWER(:name)
+                      AND year = :year
+                    LIMIT 1
+                '''),
+                {"club_id": club_id, "name": name, "year": year}
+            ).scalar()
+
+            if exists:
+                return jsonify({"ok": False, "error": "Series already exists for this club/year"}), 409
+
+            series_id = conn.execute(
+                text('''
+                    INSERT INTO "RACINGAPP"."SERIESCONTROL" (key, year, name, club)
+                    VALUES (nextval('key'), :year, :name, :club)
+                    RETURNING key
+                '''),
+                {"year": year, "name": name, "club": club_id}
+            ).scalar()
+
+        session["series_setup_id"] = int(series_id)
+
+        return jsonify({"ok": True, "series_id": series_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.get("/api/series/manage")
 def api_series_manage_list():
     club_id = session.get("club_id")
@@ -1044,6 +2160,32 @@ def api_series_manage_list():
             ).mappings().all()
 
         return jsonify({"ok": True, "series": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/series/manage/<int:series_id>")
+def api_series_manage_get(series_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            row = conn.execute(
+                text('''
+                    SELECT key, year, name
+                    FROM "RACINGAPP"."SERIESCONTROL"
+                    WHERE key = :series_id
+                      AND club = :club_id
+                    LIMIT 1
+                '''),
+                {"series_id": series_id, "club_id": club_id}
+            ).mappings().first()
+
+        if not row:
+            return jsonify({"ok": False, "error": "Series not found"}), 404
+        return jsonify({"ok": True, "series": dict(row)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -1167,16 +2309,26 @@ def api_series_manage_update(series_id):
         return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True) or {}
-    year = (payload.get("year") or "").strip()
+    year = (payload.get("year") or "").strip() or None
     name = (payload.get("name") or "").strip()
 
     if not name:
         return jsonify({"ok": False, "error": "Series name is required"}), 400
-    if not year:
-        return jsonify({"ok": False, "error": "Series year is required"}), 400
 
     try:
         with db.engine.begin() as conn:
+            # If no year supplied, keep the existing one stored in the DB
+            if year is None:
+                existing = conn.execute(
+                    text('''
+                        SELECT year FROM "RACINGAPP"."SERIESCONTROL"
+                        WHERE key = :series_id AND club = :club_id
+                        LIMIT 1
+                    '''),
+                    {"series_id": series_id, "club_id": club_id}
+                ).scalar()
+                year = existing or str(date.today().year)
+
             updated = conn.execute(
                 text('''
                     UPDATE "RACINGAPP"."SERIESCONTROL"
@@ -1191,7 +2343,623 @@ def api_series_manage_update(series_id):
         if updated.rowcount == 0:
             return jsonify({"ok": False, "error": "Series not found"}), 404
 
+        session["series_setup_id"] = int(series_id)
+
         return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/series/manage/<int:series_id>/rules")
+def api_series_manage_rules_list(series_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            ensure_series_schedule_tables(conn)
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            rows = conn.execute(
+                text('''
+                    SELECT key, weekday, start_time, cadence_weeks, races_per_day,
+                           target_race_count, extra_start_times, valid_from, valid_to, is_active
+                    FROM "RACINGAPP"."SERIES_RULE"
+                    WHERE series = :series_id
+                    ORDER BY valid_from ASC, weekday ASC, start_time ASC, key ASC
+                '''),
+                {"series_id": series_id}
+            ).mappings().all()
+
+        rules = []
+        for r in rows:
+            item = dict(r)
+            if item.get("start_time") is not None:
+                item["start_time"] = item["start_time"].strftime("%H:%M")
+            if item.get("valid_from") is not None:
+                item["valid_from"] = item["valid_from"].isoformat()
+            if item.get("valid_to") is not None:
+                item["valid_to"] = item["valid_to"].isoformat()
+            rules.append(item)
+
+        return jsonify({"ok": True, "rules": rules})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/series/manage/<int:series_id>/rules")
+def api_series_manage_rules_create(series_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        weekday = parse_weekday(payload.get("weekday"))
+        start_time = parse_time_hh_mm(payload.get("start_time"), "start_time")
+        cadence_weeks = int(payload.get("cadence_weeks") or 1)
+        races_per_day = int(payload.get("races_per_day") or 1)
+        target_race_count = int(payload.get("race_count") or 0)
+        additional_times = parse_time_list_hh_mm(payload.get("additional_start_times"), "additional_start_times")
+        valid_from = parse_date_yyyy_mm_dd(payload.get("valid_from"), "valid_from")
+        valid_to_raw = (payload.get("valid_to") or "").strip()
+        is_active = bool(payload.get("is_active", True))
+
+        valid_to = parse_date_yyyy_mm_dd(valid_to_raw, "valid_to") if valid_to_raw else None
+
+        if cadence_weeks < 1 or races_per_day < 1:
+            return jsonify({"ok": False, "error": "cadence_weeks and races_per_day must be > 0"}), 400
+        if target_race_count < 0:
+            return jsonify({"ok": False, "error": "race_count cannot be negative"}), 400
+        if target_race_count > 0:
+            valid_to = calculate_rule_end_date(valid_from, weekday, cadence_weeks, races_per_day, target_race_count)
+        if not valid_to:
+            return jsonify({"ok": False, "error": "Provide race_count (>0) or valid_to"}), 400
+        if valid_to and valid_to < valid_from:
+            return jsonify({"ok": False, "error": "valid_to cannot be before valid_from"}), 400
+        if races_per_day > 1 and len(additional_times) != (races_per_day - 1):
+            return jsonify({
+                "ok": False,
+                "error": f"Provide exactly {races_per_day - 1} additional_start_times value(s) in HH:MM"
+            }), 400
+
+        extra_start_times = ",".join([t.strftime("%H:%M") for t in additional_times]) if additional_times else None
+
+        with db.engine.begin() as conn:
+            ensure_series_schedule_tables(conn)
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."SERIESCONTROL"
+                    SET year = :year
+                    WHERE key = :series_id
+                      AND club = :club_id
+                '''),
+                {"year": str(valid_from.year), "series_id": series_id, "club_id": club_id}
+            )
+
+            rule_id = conn.execute(
+                text('''
+                    INSERT INTO "RACINGAPP"."SERIES_RULE"
+                        (key, series, weekday, start_time, cadence_weeks, races_per_day,
+                         target_race_count, extra_start_times, valid_from, valid_to, is_active)
+                    VALUES
+                        (nextval('key'), :series, :weekday, :start_time, :cadence_weeks, :races_per_day,
+                         :target_race_count, :extra_start_times, :valid_from, :valid_to, :is_active)
+                    RETURNING key
+                '''),
+                {
+                    "series": series_id,
+                    "weekday": weekday,
+                    "start_time": start_time,
+                    "cadence_weeks": cadence_weeks,
+                    "races_per_day": races_per_day,
+                    "target_race_count": target_race_count if target_race_count > 0 else None,
+                    "extra_start_times": extra_start_times,
+                    "valid_from": valid_from,
+                    "valid_to": valid_to,
+                    "is_active": is_active
+                }
+            ).scalar()
+
+            recompute_series_rule_end_dates(conn, series_id)
+
+        return jsonify({"ok": True, "rule_id": rule_id})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.put("/api/series/manage/<int:series_id>/rules/<int:rule_id>")
+def api_series_manage_rules_update(series_id, rule_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        weekday = parse_weekday(payload.get("weekday"))
+        start_time = parse_time_hh_mm(payload.get("start_time"), "start_time")
+        cadence_weeks = int(payload.get("cadence_weeks") or 1)
+        races_per_day = int(payload.get("races_per_day") or 1)
+        target_race_count = int(payload.get("race_count") or 0)
+        additional_times = parse_time_list_hh_mm(payload.get("additional_start_times"), "additional_start_times")
+        valid_from = parse_date_yyyy_mm_dd(payload.get("valid_from"), "valid_from")
+        valid_to_raw = (payload.get("valid_to") or "").strip()
+        is_active = bool(payload.get("is_active", True))
+
+        valid_to = parse_date_yyyy_mm_dd(valid_to_raw, "valid_to") if valid_to_raw else None
+
+        if cadence_weeks < 1 or races_per_day < 1:
+            return jsonify({"ok": False, "error": "cadence_weeks and races_per_day must be > 0"}), 400
+        if target_race_count < 0:
+            return jsonify({"ok": False, "error": "race_count cannot be negative"}), 400
+        if target_race_count > 0:
+            valid_to = calculate_rule_end_date(valid_from, weekday, cadence_weeks, races_per_day, target_race_count)
+        if not valid_to:
+            return jsonify({"ok": False, "error": "Provide race_count (>0) or valid_to"}), 400
+        if valid_to and valid_to < valid_from:
+            return jsonify({"ok": False, "error": "valid_to cannot be before valid_from"}), 400
+        if races_per_day > 1 and len(additional_times) != (races_per_day - 1):
+            return jsonify({
+                "ok": False,
+                "error": f"Provide exactly {races_per_day - 1} additional_start_times value(s) in HH:MM"
+            }), 400
+
+        extra_start_times = ",".join([t.strftime("%H:%M") for t in additional_times]) if additional_times else None
+
+        with db.engine.begin() as conn:
+            ensure_series_schedule_tables(conn)
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."SERIESCONTROL"
+                    SET year = :year
+                    WHERE key = :series_id
+                      AND club = :club_id
+                '''),
+                {"year": str(valid_from.year), "series_id": series_id, "club_id": club_id}
+            )
+
+            updated = conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."SERIES_RULE"
+                    SET weekday = :weekday,
+                        start_time = :start_time,
+                        cadence_weeks = :cadence_weeks,
+                        races_per_day = :races_per_day,
+                        target_race_count = :target_race_count,
+                        extra_start_times = :extra_start_times,
+                        valid_from = :valid_from,
+                        valid_to = :valid_to,
+                        is_active = :is_active
+                    WHERE key = :rule_id
+                      AND series = :series_id
+                '''),
+                {
+                    "weekday": weekday,
+                    "start_time": start_time,
+                    "cadence_weeks": cadence_weeks,
+                    "races_per_day": races_per_day,
+                    "target_race_count": target_race_count if target_race_count > 0 else None,
+                    "extra_start_times": extra_start_times,
+                    "valid_from": valid_from,
+                    "valid_to": valid_to,
+                    "is_active": is_active,
+                    "rule_id": rule_id,
+                    "series_id": series_id,
+                }
+            )
+
+            if updated.rowcount == 0:
+                return jsonify({"ok": False, "error": "Rule not found"}), 404
+
+            recompute_series_rule_end_dates(conn, series_id)
+
+        return jsonify({"ok": True, "rule_id": rule_id})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.delete("/api/series/manage/<int:series_id>/rules/<int:rule_id>")
+def api_series_manage_rules_delete(series_id, rule_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.begin() as conn:
+            ensure_series_schedule_tables(conn)
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            deleted = conn.execute(
+                text('''
+                    DELETE FROM "RACINGAPP"."SERIES_RULE"
+                    WHERE key = :rule_id
+                      AND series = :series_id
+                '''),
+                {"rule_id": rule_id, "series_id": series_id}
+            )
+
+        if deleted.rowcount == 0:
+            return jsonify({"ok": False, "error": "Rule not found"}), 404
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/series/manage/<int:series_id>/exceptions")
+def api_series_manage_exceptions_list(series_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            ensure_series_schedule_tables(conn)
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            rows = conn.execute(
+                text('''
+                                        SELECT key, COALESCE(exception_date, DATE(original_start_at)) AS exception_date, note, is_active
+                    FROM "RACINGAPP"."SERIES_EXCEPTION"
+                    WHERE series = :series_id
+                                            AND exception_type = 'cancel'
+                                        ORDER BY COALESCE(exception_date, DATE(original_start_at)) ASC, key ASC
+                '''),
+                {"series_id": series_id}
+            ).mappings().all()
+
+        return jsonify({"ok": True, "exceptions": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/series/manage/<int:series_id>/exceptions")
+def api_series_manage_exceptions_create(series_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    ex_date_raw = (payload.get("exception_date") or "").strip()
+    note = (payload.get("note") or "").strip() or None
+    is_active = bool(payload.get("is_active", True))
+
+    try:
+        if not ex_date_raw:
+            return jsonify({"ok": False, "error": "exception_date is required"}), 400
+        exception_date = parse_date_yyyy_mm_dd(ex_date_raw, "exception_date")
+        original_start_at = datetime.combine(exception_date, time(0, 0))
+
+        with db.engine.begin() as conn:
+            ensure_series_schedule_tables(conn)
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            exception_id = conn.execute(
+                text('''
+                    INSERT INTO "RACINGAPP"."SERIES_EXCEPTION"
+                        (key, series, exception_type, exception_date, original_start_at, override_start_at, note, is_active)
+                    VALUES
+                        (nextval('key'), :series, 'cancel', :exception_date, :original_start_at, NULL, :note, :is_active)
+                    RETURNING key
+                '''),
+                {
+                    "series": series_id,
+                    "exception_date": exception_date,
+                    "original_start_at": original_start_at,
+                    "note": note,
+                    "is_active": is_active
+                }
+            ).scalar()
+
+            recompute_series_rule_end_dates(conn, series_id)
+
+        return jsonify({"ok": True, "exception_id": exception_id})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.put("/api/series/manage/<int:series_id>/exceptions/<int:exception_id>")
+def api_series_manage_exceptions_update(series_id, exception_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    ex_date_raw = (payload.get("exception_date") or "").strip()
+    note = (payload.get("note") or "").strip() or None
+    is_active = bool(payload.get("is_active", True))
+
+    try:
+        if not ex_date_raw:
+            return jsonify({"ok": False, "error": "exception_date is required"}), 400
+        exception_date = parse_date_yyyy_mm_dd(ex_date_raw, "exception_date")
+        original_start_at = datetime.combine(exception_date, time(0, 0))
+
+        with db.engine.begin() as conn:
+            ensure_series_schedule_tables(conn)
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            updated = conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."SERIES_EXCEPTION"
+                    SET exception_date = :exception_date,
+                        original_start_at = :original_start_at,
+                        note = :note,
+                        is_active = :is_active
+                    WHERE key = :exception_id
+                      AND series = :series_id
+                      AND exception_type = 'cancel'
+                '''),
+                {
+                    "exception_date": exception_date,
+                    "original_start_at": original_start_at,
+                    "note": note,
+                    "is_active": is_active,
+                    "exception_id": exception_id,
+                    "series_id": series_id,
+                }
+            )
+
+            if updated.rowcount == 0:
+                return jsonify({"ok": False, "error": "Exception not found"}), 404
+
+            recompute_series_rule_end_dates(conn, series_id)
+
+        return jsonify({"ok": True, "exception_id": exception_id})
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.delete("/api/series/manage/<int:series_id>/exceptions/<int:exception_id>")
+def api_series_manage_exceptions_delete(series_id, exception_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.begin() as conn:
+            ensure_series_schedule_tables(conn)
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            deleted = conn.execute(
+                text('''
+                    DELETE FROM "RACINGAPP"."SERIES_EXCEPTION"
+                    WHERE key = :exception_id
+                      AND series = :series_id
+                      AND exception_type = 'cancel'
+                '''),
+                {"exception_id": exception_id, "series_id": series_id}
+            )
+
+            if deleted.rowcount == 0:
+                return jsonify({"ok": False, "error": "Exception not found"}), 404
+
+            recompute_series_rule_end_dates(conn, series_id)
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/series/manage/<int:series_id>/scoring")
+def api_series_manage_scoring_get(series_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            ensure_series_schedule_tables(conn)
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            row = conn.execute(
+                text('''
+                    SELECT scoring_system, races_to_count, discard_after_races, discards_allowed
+                    FROM "RACINGAPP"."SERIES_SCORING"
+                    WHERE series = :series
+                '''),
+                {"series": series_id}
+            ).mappings().first()
+
+            discard_rows = conn.execute(
+                text('''
+                    SELECT discard_count, after_races
+                    FROM "RACINGAPP"."SERIES_SCORING_DISCARD"
+                    WHERE series = :series
+                    ORDER BY discard_count ASC
+                '''),
+                {"series": series_id}
+            ).mappings().all()
+
+        default_cfg = {
+            "scoring_system": "low_point",
+            "discard_rules": []
+        }
+
+        scoring = dict(row) if row else default_cfg
+        scoring["scoring_system"] = "low_point"
+        scoring["discard_rules"] = [dict(r) for r in discard_rows]
+        scoring.pop("races_to_count", None)
+        scoring.pop("discard_after_races", None)
+        scoring.pop("discards_allowed", None)
+
+        return jsonify({"ok": True, "scoring": scoring})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/series/manage/<int:series_id>/scoring")
+def api_series_manage_scoring_save(series_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    discard_rules = payload.get("discard_rules") or []
+
+    try:
+        normalized = []
+        seen_counts = set()
+
+        for item in discard_rules:
+            discard_count = int(item.get("discard_count"))
+            after_races = int(item.get("after_races"))
+
+            if discard_count < 1:
+                return jsonify({"ok": False, "error": "discard_count must be >= 1"}), 400
+            if after_races < 1:
+                return jsonify({"ok": False, "error": "after_races must be >= 1"}), 400
+            if discard_count in seen_counts:
+                return jsonify({"ok": False, "error": "duplicate discard_count values are not allowed"}), 400
+
+            seen_counts.add(discard_count)
+            normalized.append({"discard_count": discard_count, "after_races": after_races})
+
+        normalized.sort(key=lambda x: x["discard_count"])
+        prev_after = 0
+        for idx, item in enumerate(normalized, start=1):
+            if item["discard_count"] != idx:
+                return jsonify({"ok": False, "error": "discard_count must be sequential starting at 1"}), 400
+            if item["after_races"] <= prev_after:
+                return jsonify({"ok": False, "error": "after_races must increase for each discard rule"}), 400
+            prev_after = item["after_races"]
+
+        with db.engine.begin() as conn:
+            ensure_series_schedule_tables(conn)
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            conn.execute(
+                text('''
+                    INSERT INTO "RACINGAPP"."SERIES_SCORING"
+                        (series, scoring_system, races_to_count, discard_after_races, discards_allowed, updated_at)
+                    VALUES
+                        (:series, 'low_point', NULL, NULL, 0, CURRENT_TIMESTAMP)
+                    ON CONFLICT (series)
+                    DO UPDATE SET
+                        scoring_system = 'low_point',
+                        races_to_count = NULL,
+                        discard_after_races = NULL,
+                        discards_allowed = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                '''),
+                {"series": series_id}
+            )
+
+            conn.execute(
+                text('DELETE FROM "RACINGAPP"."SERIES_SCORING_DISCARD" WHERE series = :series'),
+                {"series": series_id}
+            )
+
+            for item in normalized:
+                conn.execute(
+                    text('''
+                        INSERT INTO "RACINGAPP"."SERIES_SCORING_DISCARD"
+                            (key, series, discard_count, after_races, created_at, updated_at)
+                        VALUES
+                            (nextval('key'), :series, :discard_count, :after_races, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    '''),
+                    {
+                        "series": series_id,
+                        "discard_count": item["discard_count"],
+                        "after_races": item["after_races"],
+                    }
+                )
+
+        return jsonify({"ok": True})
+    except ValueError:
+        return jsonify({"ok": False, "error": "Invalid numeric scoring values"}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/series/manage/<int:series_id>/generate")
+def api_series_manage_generate(series_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        from_raw = (payload.get("from_date") or "").strip()
+        to_raw = (payload.get("to_date") or "").strip()
+        from_date = parse_date_yyyy_mm_dd(from_raw, "from_date") if from_raw else date.today()
+        to_date = parse_date_yyyy_mm_dd(to_raw, "to_date") if to_raw else (from_date + timedelta(days=120))
+
+        if to_date < from_date:
+            return jsonify({"ok": False, "error": "to_date cannot be before from_date"}), 400
+
+        with db.engine.begin() as conn:
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+            summary = generate_series_races(conn, series_id, club_id, from_date, to_date)
+
+        return jsonify({
+            "ok": True,
+            "series_id": series_id,
+            "from_date": from_date.isoformat(),
+            "to_date": to_date.isoformat(),
+            **summary
+        })
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/series/manage/<int:series_id>/races")
+def api_series_manage_races_list(series_id):
+    club_id = session.get("club_id")
+    if not club_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    try:
+        with db.engine.connect() as conn:
+            if not check_series_access(conn, series_id, club_id):
+                return jsonify({"ok": False, "error": "Series not found"}), 404
+
+            rows = conn.execute(
+                text('''
+                    SELECT key, race_no, status, started_at
+                    FROM "RACINGAPP"."RACE"
+                    WHERE series = :series_id
+                    ORDER BY started_at ASC, race_no ASC
+                '''),
+                {"series_id": series_id}
+            ).mappings().all()
+
+        races = []
+        for r in rows:
+            item = dict(r)
+            if item.get("started_at") is not None:
+                item["started_at"] = item["started_at"].isoformat()
+            races.append(item)
+
+        return jsonify({"ok": True, "races": races})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

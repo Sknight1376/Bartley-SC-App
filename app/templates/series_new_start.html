@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+</head>
+<body data-current-series-id="{{ currentSeriesId or '' }}">
+<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
+<section class="banner"></section>
+<br>
+
+<div class="form-border">
+  <div class="entry-banner">
+    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color:#fff; text-align:center; line-height:40px;">1. Add New Series</div>
+    <div style="color:#979797; text-align:center; line-height:40px;">2. Series Name</div>
+    <div style="color:#979797; text-align:center; line-height:40px;">3. Scheduling</div>
+    <div style="color:#979797; text-align:center; line-height:40px;">4. Scoring</div>
+    <div style="color:#979797; text-align:center; line-height:40px;">5. Summary</div>
+  </div>
+  <br>
+  <h4 style="color:#979797">Step One</h4>
+  <h2>Add a New Series</h2>
+  <h4 style="color:#979797">This guided setup will take you through name, scheduling, scoring, and summary.</h4>
+
+  <div id="activeSetupNotice" style="display:none; margin:20px 110px 0; padding:14px 16px; border:1px solid #d0d7ff; border-radius:8px; background:#f7f8ff; color:#444;">
+    <strong style="color:#1331C5;">Current setup in progress.</strong>
+    <div style="margin-top:6px; font-size:13px;">You can continue editing the current series setup, or start over with a fresh journey.</div>
+  </div>
+</div>
+
+<div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
+  <button class="blue-button" onclick="window.location.href='/series'">Back to Series List</button>
+  <button id="continueBtn" class="blue-button">> Continue</button>
+  <button id="startOverBtn" class="blue-button" style="display:none; background:#6b7280;">Start Over</button>
+</div>
+
+<script>
+const currentSeriesId = document.body.dataset.currentSeriesId || null;
+const activeSetupNotice = document.getElementById('activeSetupNotice');
+const startOverBtn = document.getElementById('startOverBtn');
+
+if (currentSeriesId) {
+  activeSetupNotice.style.display = 'block';
+  startOverBtn.style.display = 'inline-block';
+  document.getElementById('continueBtn').textContent = '> Continue Current Setup';
+}
+
+document.getElementById('continueBtn').addEventListener('click', () => {
+  if (currentSeriesId) {
+    window.location.href = `/series/new/name?series_id=${currentSeriesId}`;
+    return;
+  }
+  window.location.href = '/series/new/name';
+});
+
+startOverBtn.addEventListener('click', async () => {
+  try {
+    const res = await fetch('/api/series/manage/setup/clear', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      alert(data.error || 'Failed to clear current series setup');
+      return;
+    }
+    window.location.href = '/series/new/name';
+  } catch (e) {
+    alert('Failed to clear current series setup');
+  }
+});
+</script>
+
+</body>
+</html>

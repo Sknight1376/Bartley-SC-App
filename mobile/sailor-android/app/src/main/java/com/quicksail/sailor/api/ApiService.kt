@@ -49,4 +49,31 @@ interface ApiService {
 
     @GET("api/mobile/races/{raceId}/results")
     suspend fun raceResults(@Path("raceId") raceId: Long): RaceResultsResponse
+
+    @GET("api/mobile/dashboard")
+    suspend fun dashboard(): DashboardResponse
+
+    @GET("api/mobile/series/standings")
+    suspend fun seriesStandings(): SeriesStandingsResponse
+
+    @GET("api/mobile/races/control/upcoming")
+    suspend fun controlUpcomingRaces(): RaceControlRacesResponse
+
+    @GET("api/mobile/races/{raceId}/control-entries")
+    suspend fun controlEntries(@Path("raceId") raceId: Long): RaceControlEntriesResponse
+
+    @POST("api/mobile/races/{raceId}/control-start")
+    suspend fun controlStartRace(@Path("raceId") raceId: Long): RaceControlStartResponse
+
+    @POST("api/mobile/races/{raceId}/control-lap")
+    suspend fun controlLap(
+        @Path("raceId") raceId: Long,
+        @Body body: RaceControlLapRequest
+    ): ApiResponse
+
+    @POST("api/mobile/races/{raceId}/control-finish")
+    suspend fun controlFinishRace(@Path("raceId") raceId: Long): ApiResponse
+
+    @GET("api/mobile/races/{raceId}/control-summary")
+    suspend fun controlRaceSummary(@Path("raceId") raceId: Long): RaceSummaryResponse
 }

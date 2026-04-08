@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+</head>
+<body data-current-series-id="{{ currentSeriesId or '' }}">
+<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
+<section class="banner"></section>
+<br>
+
+<div class="form-border">
+  <div class="entry-banner">
+    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">1. Add New Series</div>
+    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color:#fff; text-align:center; line-height:40px;">2. Series Name</div>
+    <div style="color:#979797; text-align:center; line-height:40px;">3. Scheduling</div>
+    <div style="color:#979797; text-align:center; line-height:40px;">4. Scoring</div>
+    <div style="color:#979797; text-align:center; line-height:40px;">5. Summary</div>
+  </div>
+  <br>
+  <h4 style="color:#979797">Step Two</h4>
+  <h2>Add Series Name</h2>
+  <h4 style="color:#979797">Year is inferred from schedule start date.</h4>
+
+  <div style="padding:0 110px;">
+    <label style="color:black;">Series Name</label>
+    <input id="seriesName" type="text" placeholder="e.g. Summer Evening Series">
+    <div id="status" style="margin-top:8px; color:#666;"></div>
+  </div>
+</div>
+
+<div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
+  <button class="blue-button" onclick="window.location.href='/series/new/start'">Back</button>
+  <button id="nextBtn" class="blue-button">> Continue to Scheduling</button>
+</div>
+
+<script>
+const currentSeriesId = document.body.dataset.currentSeriesId || null;
+
+function getSeriesId() {
+  return new URLSearchParams(window.location.search).get('series_id') || currentSeriesId || null;
+}
+
+async function createSeriesAndContinue() {
+  const name = document.getElementById('seriesName').value.trim();
+  if (!name) {
+    alert('Series name is required.');
+    return;
+  }
+
+  const seriesId = getSeriesId();
+  const endpoint = seriesId ? `/api/series/manage/${seriesId}` : '/api/series/manage/basic';
+  const method = seriesId ? 'PUT' : 'POST';
+
+  const res = await fetch(endpoint, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    alert(data.error || `Failed to ${seriesId ? 'save' : 'create'} series`);
+    return;
+  }
+
+  const nextSeriesId = seriesId || data.series_id;
+  window.location.href = `/series/new/schedule?series_id=${nextSeriesId}`;
+}
+
+async function loadExistingSeries() {
+  const seriesId = getSeriesId();
+  if (!seriesId) {
+    return;
+  }
+
+  const res = await fetch(`/api/series/manage/${seriesId}`, { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+
+  // Stale session ID — series was deleted or data was reset. Clear it and start fresh.
+  if (res.status === 404 || !data.ok) {
+    await fetch('/api/series/manage/setup/clear', { method: 'POST' }).catch(() => {});
+    document.body.dataset.currentSeriesId = '';
+    return;
+  }
+
+  document.getElementById('seriesName').value = data.series.name || '';
+  document.getElementById('status').textContent = `Editing ${data.series.name}`;
+  document.getElementById('nextBtn').textContent = '> Save and Continue to Scheduling';
+}
+
+document.getElementById('nextBtn').addEventListener('click', createSeriesAndContinue);
+(async function initPage() {
+  try {
+    await loadExistingSeries();
+  } catch (e) {
+    alert(e.message || 'Failed to load series name');
+  }
+})();
+</script>
+</body>
+</html>
