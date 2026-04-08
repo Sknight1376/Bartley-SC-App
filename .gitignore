@@ -5,6 +5,9 @@ database.db
 __pycache__
 api.log
 
+# Local secrets — see .env.example for the template
+.env
+
 # Android/Gradle local artifacts
 mobile/sailor-android/.gradle/
 mobile/sailor-android/build/

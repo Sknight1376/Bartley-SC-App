@@ -3,6 +3,10 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from datetime import datetime, timedelta, time, date
 import json
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from services.permissions import (
     club_user_has_role as permission_club_user_has_role,
@@ -135,13 +139,13 @@ from club_dashboard_api import (
 
 
 app = Flask(__name__)
-# Connect to local PostgreSQL (Windows) instead of Docker
-app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://dwh:DBTTEST@localhost:5432/dwh"
-# Do not enforce SERVER_NAME in this environment; allow host and port to be set via run() parameters
-# app.config['SERVER_NAME'] = "localhost:5000"
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+    'DATABASE_URL',
+    'postgresql://dwh:DBTTEST@localhost:5432/dwh'
+)
 app.app_context().push()
 db = SQLAlchemy(app)
-app.secret_key = "4001376"
+app.secret_key = os.environ.get('SECRET_KEY', 'change-me-in-production')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 db.Model.metadata.reflect(db.engine, schema='RACINGAPP')
 

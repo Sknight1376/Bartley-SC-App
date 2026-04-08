@@ -11,6 +11,7 @@ import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
+import com.quicksail.sailor.BuildConfig
 import retrofit2.converter.gson.GsonConverterFactory
 
 private class PersistentSecureCookieJar(context: Context) : CookieJar {
@@ -124,7 +125,10 @@ object Network {
         val client: OkHttpClient = OkHttpClient.Builder()
             .cookieJar(cookieJar)
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BODY
+                level = if (BuildConfig.DEBUG)
+                    HttpLoggingInterceptor.Level.BODY
+                else
+                    HttpLoggingInterceptor.Level.NONE
             })
             .build()
 
