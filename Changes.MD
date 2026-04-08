@@ -35,7 +35,7 @@ Priority levels:
 - [x] Add a user-friendly fallback modal when `/api/session/entries` fails, with `Try again` and `Start new race` actions
 
 ### Web — Club Dashboard
-- [ ] Build a dedicated retrospective results workflow: create/select race → add/import entries → input finish data → preview standings → approve/publish → immutable audit revisions
+- [x] Build a dedicated retrospective results workflow: create/select race → add/import entries → input finish data → preview standings → approve/publish → immutable audit revisions
 
 ### Mobile
 - [ ] Add explicit success feedback and per-section loading / empty / error states

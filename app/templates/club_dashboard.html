@@ -107,6 +107,37 @@
     <section id="view-imports" class="dash-card hidden">
       <h3>Imports from Paper / CSV</h3>
       <div class="dash-body">
+        <div style="margin-bottom:24px; border-bottom:1px solid #eef1ff; padding-bottom:18px;">
+          <h4 style="margin:0 0 12px; color:#1331C5;">Dedicated Retrospective Results Workflow</h4>
+          <p class="muted" style="margin:0 0 10px;">
+            Step 1: create/select race → Step 2: import/add draft entries → Step 3: preview standings → Step 4: publish.
+          </p>
+          <div class="dash-controls">
+            <label>From <input type="date" id="retrospectiveFrom"></label>
+            <label>To <input type="date" id="retrospectiveTo"></label>
+            <label>Series <select id="retrospectiveSeries"><option value="">All series</option></select></label>
+            <button class="dash-nav-btn" id="reloadRetrospectiveBtn">Reload Races</button>
+          </div>
+          <table class="dash-table" style="margin-top:8px;">
+            <thead>
+              <tr><th>Race ID</th><th>Series</th><th>Race</th><th>Start</th><th>Status</th><th>Results</th><th>Source</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="retrospectiveRows"></tbody>
+          </table>
+
+          <div class="dash-controls" style="margin-top:14px;">
+            <label>Selected Race ID <input type="number" id="workflowRaceId" min="1" placeholder="Select from list or type"></label>
+            <button class="dash-nav-btn" id="previewRetrospectiveBtn">Preview Standings</button>
+            <button class="dash-nav-btn" id="publishRetrospectiveBtn">Approve / Publish</button>
+          </div>
+          <div id="retrospectiveStatus" class="muted"></div>
+
+          <table class="dash-table" style="margin-top:10px;">
+            <thead><tr><th>Sailor</th><th>Boat</th><th>Sail #</th><th>Elapsed</th><th>Corrected</th><th>Pos</th><th>DNF</th></tr></thead>
+            <tbody id="retrospectivePreviewRows"></tbody>
+          </table>
+        </div>
+
         <div class="dash-controls">
           <input type="file" id="importFile" accept=".csv,text/csv">
           <button class="dash-nav-btn" id="previewImportBtn">Preview CSV</button>

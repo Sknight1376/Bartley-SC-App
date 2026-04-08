@@ -136,9 +136,120 @@
 
   async function loadSeriesOptions() {
     const select = document.getElementById("manualSeriesId");
+    const retrospectiveSeries = document.getElementById("retrospectiveSeries");
     if (!select) return;
     const data = await getJson("/api/series/manage");
-    select.innerHTML = `<option value="">Select series...</option>${(data.series || []).map((s) => `<option value="${esc(s.key || s.id)}">${esc(s.name)}${s.year ? ` (${esc(s.year)})` : ""}</option>`).join("")}`;
+    const options = (data.series || []).map((s) => `<option value="${esc(s.key || s.id)}">${esc(s.name)}${s.year ? ` (${esc(s.year)})` : ""}</option>`).join("");
+    select.innerHTML = `<option value="">Select series...</option>${options}`;
+    if (retrospectiveSeries) {
+      retrospectiveSeries.innerHTML = `<option value="">All series</option>${options}`;
+    }
+  }
+
+  function setWorkflowRaceId(raceId) {
+    const rid = raceId ? String(raceId) : "";
+    const workflow = document.getElementById("workflowRaceId");
+    const manual = document.getElementById("manualRaceId");
+    const importRace = document.getElementById("importRaceId");
+    if (workflow) workflow.value = rid;
+    if (manual) manual.value = rid;
+    if (importRace) importRace.value = rid;
+  }
+
+  async function loadRetrospectiveRaces() {
+    const status = document.getElementById("retrospectiveStatus");
+    const rows = document.getElementById("retrospectiveRows");
+    const from = document.getElementById("retrospectiveFrom")?.value || "";
+    const to = document.getElementById("retrospectiveTo")?.value || "";
+    const seriesId = document.getElementById("retrospectiveSeries")?.value || "";
+
+    const qs = new URLSearchParams();
+    if (from) qs.set("from_date", from);
+    if (to) qs.set("to_date", to);
+    if (seriesId) qs.set("series_id", seriesId);
+
+    try {
+      const data = await getJson(`/api/races/retrospective?${qs.toString()}`);
+      rows.innerHTML = (data.races || []).map((r) => `
+        <tr>
+          <td>${esc(r.key)}</td>
+          <td>${esc(r.series_name || r.series || "")}</td>
+          <td>#${esc(r.race_no)}</td>
+          <td>${fmtDateTime(r.started_at)}</td>
+          <td>${esc(r.status)}</td>
+          <td>${esc(r.results_status || "draft")}</td>
+          <td>${esc(r.source_mode || "retrospective")}</td>
+          <td>
+            <button class="dash-nav-btn" style="padding:4px 8px;" data-select-race="${esc(r.key)}">Select</button>
+            <a href="/race_summary?race_id=${encodeURIComponent(r.key)}" style="margin-left:6px;">Summary</a>
+            <a href="/api/races/${encodeURIComponent(r.key)}/audit" style="margin-left:6px;">Audit</a>
+            <a href="/api/races/${encodeURIComponent(r.key)}/revisions" style="margin-left:6px;">Revisions</a>
+          </td>
+        </tr>
+      `).join("") || `<tr><td colspan="8" class="muted">No retrospective races found for this filter.</td></tr>`;
+
+      rows.querySelectorAll("button[data-select-race]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          setWorkflowRaceId(btn.getAttribute("data-select-race"));
+          status.textContent = `Selected race ${btn.getAttribute("data-select-race")}.`;
+        });
+      });
+
+      status.textContent = `Loaded ${(data.races || []).length} retrospective race(s).`;
+    } catch (e) {
+      rows.innerHTML = `<tr><td colspan="8" class="muted">Failed to load races.</td></tr>`;
+      status.textContent = e.message || "Failed to load retrospective races.";
+    }
+  }
+
+  async function previewRetrospective() {
+    const raceId = (document.getElementById("workflowRaceId")?.value || "").trim();
+    const status = document.getElementById("retrospectiveStatus");
+    const rows = document.getElementById("retrospectivePreviewRows");
+
+    if (!raceId) {
+      status.textContent = "Select a race first.";
+      return;
+    }
+
+    try {
+      const data = await getJson(`/api/races/${encodeURIComponent(raceId)}/retrospective/preview`);
+      rows.innerHTML = (data.results || []).map((e) => `
+        <tr>
+          <td>${esc(e.sailor)}</td>
+          <td>${esc(e.boat)}</td>
+          <td>${esc(e.sail_number)}</td>
+          <td class="mono">${esc(e.elapsed_time || "")}</td>
+          <td class="mono">${esc(e.corrected_time || "")}</td>
+          <td>${esc(e.position || "")}</td>
+          <td>${e.dnf ? "YES" : ""}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="7" class="muted">No results in draft for this race.</td></tr>`;
+      status.textContent = `Preview loaded for race ${raceId}. Results status: ${data.race?.results_status || "draft"}.`;
+    } catch (e) {
+      rows.innerHTML = `<tr><td colspan="7" class="muted">Preview failed.</td></tr>`;
+      status.textContent = e.message || "Failed to preview retrospective results.";
+    }
+  }
+
+  async function publishRetrospective() {
+    const raceId = (document.getElementById("workflowRaceId")?.value || "").trim();
+    const status = document.getElementById("retrospectiveStatus");
+    if (!raceId) {
+      status.textContent = "Select a race first.";
+      return;
+    }
+
+    try {
+      await postJson(`/api/races/${encodeURIComponent(raceId)}/results/publish`, {
+        reason: "Approved and published from Club Dashboard retrospective workflow",
+      });
+      status.textContent = `Race ${raceId} published successfully.`;
+      await loadRetrospectiveRaces();
+      await previewRetrospective();
+    } catch (e) {
+      status.textContent = e.message || "Failed to publish results.";
+    }
   }
 
   function renderManualEntries() {
@@ -234,6 +345,8 @@
       });
 
       status.textContent = `Saved ${manualEntries.length} row(s) to race ${raceId}.`;
+      setWorkflowRaceId(raceId);
+      await loadRetrospectiveRaces();
     } catch (e) {
       status.textContent = e.message || "Failed to save manual race.";
     }
@@ -319,6 +432,9 @@
   document.getElementById("applyImportBtn").addEventListener("click", applyImport);
   document.getElementById("addManualEntryBtn")?.addEventListener("click", addManualEntry);
   document.getElementById("saveManualRaceBtn")?.addEventListener("click", saveManualRace);
+  document.getElementById("reloadRetrospectiveBtn")?.addEventListener("click", loadRetrospectiveRaces);
+  document.getElementById("previewRetrospectiveBtn")?.addEventListener("click", previewRetrospective);
+  document.getElementById("publishRetrospectiveBtn")?.addEventListener("click", publishRetrospective);
   document.getElementById("clearManualEntriesBtn")?.addEventListener("click", () => {
     manualEntries.length = 0;
     document.getElementById("manualImportStatus").textContent = "Manual rows cleared.";
@@ -334,6 +450,7 @@
         loadReviewQueue(),
         loadHandicapRecommendations(),
         loadSeriesOptions(),
+        loadRetrospectiveRaces(),
       ]);
       renderManualEntries();
     } catch (e) {
