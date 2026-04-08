@@ -77,6 +77,14 @@ class SailorViewModel : ViewModel() {
     val state: StateFlow<SailorUiState> = _state.asStateFlow()
     private var syncingPendingActions = false
 
+    private fun safeNetworkMessage(defaultMessage: String, throwable: Throwable?): String {
+        return when {
+            Network.isTimeoutError(throwable) -> "Request timed out. Try again."
+            Network.isTransientNetworkError(throwable) -> "Network error. Check your connection and try again."
+            else -> defaultMessage
+        }
+    }
+
     init {
         val (savedPage, savedScroll) = Network.loadUiContinuity()
         _state.value = _state.value.copy(
@@ -165,32 +173,7 @@ class SailorViewModel : ViewModel() {
             return@launch
         }
 
-        // 2. Cookie expired – silently re-authenticate if within the 24-hour window
-        val creds = Network.loadCredentials()
-        if (creds != null && Network.isCredentialFresh()) {
-            val (username, password) = creds
-            val loginResp = runCatching {
-                Network.api.login(com.quicksail.sailor.api.MobileLoginRequest(username, password))
-            }.getOrNull()
-            if (loginResp?.ok == true) {
-                Network.saveCredentials(username, password) // refresh the 24-hour window
-                _state.value = _state.value.copy(
-                    login = loginResp,
-                    error = null,
-                    sessionRestoreChecked = true
-                )
-                refreshSeries()
-                refreshRaces()
-                loadControlAccess()
-                loadControlRaces()
-                loadDashboard()
-                loadClubSeriesStandings()
-                refreshMe()
-                return@launch
-            }
-        }
-
-        // 3. No valid session or credentials within window – show login screen
+        // 2. No valid session cookie – show login screen.
         _state.value = _state.value.copy(sessionRestoreChecked = true)
     }
 
@@ -210,7 +193,7 @@ class SailorViewModel : ViewModel() {
                 else _state.value = _state.value.copy(error = it.error)
             }
             .onFailure {
-                _state.value = _state.value.copy(error = it.message)
+                _state.value = _state.value.copy(error = safeNetworkMessage("Unable to load clubs", it))
             }
     }
 
@@ -219,7 +202,7 @@ class SailorViewModel : ViewModel() {
         runCatching { Network.api.login(com.quicksail.sailor.api.MobileLoginRequest(username, password)) }
             .onSuccess {
                 if (it.ok) {
-                    Network.saveCredentials(username, password)
+                    Network.saveCredentials(username)
                     _state.value = _state.value.copy(loading = false, login = it, error = null)
                     loadClubs()
                     loadBoatClasses()
@@ -235,7 +218,7 @@ class SailorViewModel : ViewModel() {
                 }
             }
             .onFailure {
-                _state.value = _state.value.copy(loading = false, error = it.message ?: "Login failed")
+                _state.value = _state.value.copy(loading = false, error = safeNetworkMessage("Login failed", it))
             }
     }
 
@@ -269,7 +252,7 @@ class SailorViewModel : ViewModel() {
                 }
             }
             .onFailure {
-                _state.value = _state.value.copy(loading = false, error = it.message ?: "Registration failed")
+                _state.value = _state.value.copy(loading = false, error = safeNetworkMessage("Registration failed", it))
             }
     }
 
@@ -305,7 +288,7 @@ class SailorViewModel : ViewModel() {
             .onFailure {
                 _state.value = _state.value.copy(
                     profileLoading = false,
-                    profileError = it.message ?: "Failed to load profile"
+                    profileError = safeNetworkMessage("Failed to load profile", it)
                 )
             }
     }
@@ -339,9 +322,7 @@ class SailorViewModel : ViewModel() {
             }
             .onFailure {
                 val msg = when {
-                    it.message?.contains("Connection") == true -> "Network error. Check your connection."
-                    Network.isTimeoutError(it) -> "Request timed out. Try again."
-                    else -> it.message ?: "Failed to save profile"
+                    else -> safeNetworkMessage("Failed to save profile", it)
                 }
                 _state.value = _state.value.copy(
                     profileLoading = false,
@@ -385,8 +366,7 @@ class SailorViewModel : ViewModel() {
                 val msg = when {
                     cached != null -> "Offline mode: showing cached dashboard data."
                     Network.isTimeoutError(it) -> "Network timeout. Pull to refresh and try again."
-                    it.message?.contains("connection", ignoreCase = true) == true -> "Network unavailable. Check your connection and try again."
-                    else -> it.message ?: "Unable to load dashboard right now."
+                    else -> safeNetworkMessage("Unable to load dashboard right now.", it)
                 }
                 if (cached != null) {
                     val payload = cached.data
@@ -431,7 +411,7 @@ class SailorViewModel : ViewModel() {
             .onFailure {
                 _state.value = _state.value.copy(
                     seriesLoading = false,
-                    seriesError = it.message ?: "Unable to load series standings"
+                    seriesError = safeNetworkMessage("Unable to load series standings", it)
                 )
             }
     }
@@ -443,7 +423,7 @@ class SailorViewModel : ViewModel() {
                 else _state.value = _state.value.copy(error = it.error)
             }
             .onFailure {
-                _state.value = _state.value.copy(error = it.message)
+                _state.value = _state.value.copy(error = safeNetworkMessage("Unable to load series", it))
             }
     }
 
@@ -458,7 +438,7 @@ class SailorViewModel : ViewModel() {
                 }
             }
             .onFailure {
-                _state.value = _state.value.copy(boatsLoading = false, profileError = it.message ?: "Unable to load boats")
+                _state.value = _state.value.copy(boatsLoading = false, profileError = safeNetworkMessage("Unable to load boats", it))
             }
     }
 
@@ -469,7 +449,7 @@ class SailorViewModel : ViewModel() {
                 else _state.value = _state.value.copy(error = it.error)
             }
             .onFailure {
-                _state.value = _state.value.copy(error = it.message)
+                _state.value = _state.value.copy(error = safeNetworkMessage("Unable to load boat classes", it))
             }
     }
 
@@ -492,7 +472,7 @@ class SailorViewModel : ViewModel() {
                 }
             }
             .onFailure {
-                val msg = it.message ?: "Failed to create boat"
+                val msg = safeNetworkMessage("Failed to create boat", it)
                 _state.value = _state.value.copy(
                     boatsLoading = false,
                     profileError = msg,
@@ -521,7 +501,7 @@ class SailorViewModel : ViewModel() {
                 }
             }
             .onFailure {
-                val msg = it.message ?: "Failed to delete boat"
+                val msg = safeNetworkMessage("Failed to delete boat", it)
                 _state.value = _state.value.copy(
                     boatsLoading = false,
                     profileError = msg,
@@ -549,7 +529,7 @@ class SailorViewModel : ViewModel() {
                         error = "Offline mode: showing cached race list."
                     )
                 } else {
-                    _state.value = _state.value.copy(error = it.message)
+                    _state.value = _state.value.copy(error = safeNetworkMessage("Unable to load race list", it))
                 }
             }
     }
@@ -583,7 +563,7 @@ class SailorViewModel : ViewModel() {
                     controlRaces = emptyList(),
                     canRaceControl = false,
                     controlAccessLoaded = true,
-                    controlError = it.message ?: "Unable to load control races"
+                    controlError = safeNetworkMessage("Unable to load control races", it)
                 )
             }
     }
@@ -615,7 +595,7 @@ class SailorViewModel : ViewModel() {
                     controlAccessLoaded = true,
                     isMobileAdmin = false,
                     assignedControlRaceIds = emptyList(),
-                    controlError = it.message ?: "Unable to load race-control access"
+                    controlError = safeNetworkMessage("Unable to load race-control access", it)
                 )
             }
     }
@@ -644,7 +624,7 @@ class SailorViewModel : ViewModel() {
                 }
             }
             .onFailure {
-                _state.value = _state.value.copy(error = it.message)
+                _state.value = _state.value.copy(error = safeNetworkMessage("Unable to load race entries", it))
             }
     }
 
@@ -683,9 +663,7 @@ class SailorViewModel : ViewModel() {
             }
             .onFailure {
                 val msg = when {
-                    it.message?.contains("Connection") == true -> "Network error. Check your connection."
-                    Network.isTimeoutError(it) -> "Request timed out. Try again."
-                    else -> it.message ?: "Failed to add entry"
+                    else -> safeNetworkMessage("Failed to add entry", it)
                 }
                 _state.value = _state.value.copy(
                     controlLoading = false,
@@ -723,9 +701,7 @@ class SailorViewModel : ViewModel() {
                     )
                 } else {
                     val msg = when {
-                        it.message?.contains("Connection") == true -> "Network error. Check your connection."
-                        Network.isTimeoutError(it) -> "Request timed out. Try again."
-                        else -> it.message ?: "Failed to start race"
+                        else -> safeNetworkMessage("Failed to start race", it)
                     }
                     _state.value = _state.value.copy(
                         controlLoading = false,
@@ -787,9 +763,7 @@ class SailorViewModel : ViewModel() {
                     )
                 } else {
                     val msg = when {
-                        it.message?.contains("Connection") == true -> "Network error. Check your connection."
-                        Network.isTimeoutError(it) -> "Request timed out. Try again."
-                        else -> it.message ?: "Failed to record lap"
+                        else -> safeNetworkMessage("Failed to record lap", it)
                     }
                     _state.value = _state.value.copy(
                         feedback = FeedbackMessage.Error(msg)
@@ -829,9 +803,7 @@ class SailorViewModel : ViewModel() {
                     )
                 } else {
                     val msg = when {
-                        it.message?.contains("Connection") == true -> "Network error. Check your connection."
-                        Network.isTimeoutError(it) -> "Request timed out. Try again."
-                        else -> it.message ?: "Failed to finish race"
+                        else -> safeNetworkMessage("Failed to finish race", it)
                     }
                     _state.value = _state.value.copy(
                         controlLoading = false,
@@ -854,7 +826,7 @@ class SailorViewModel : ViewModel() {
                 }
             }
             .onFailure {
-                _state.value = _state.value.copy(error = it.message)
+                _state.value = _state.value.copy(error = safeNetworkMessage("Unable to load race summary", it))
             }
     }
 
@@ -892,9 +864,7 @@ class SailorViewModel : ViewModel() {
                     )
                 } else {
                     val msg = when {
-                        it.message?.contains("Connection") == true -> "Network error. Check your connection."
-                        Network.isTimeoutError(it) -> "Request timed out. Try again."
-                        else -> it.message ?: "Failed to join race"
+                        else -> safeNetworkMessage("Failed to join race", it)
                     }
                     _state.value = _state.value.copy(
                         racesLoading = false,
@@ -921,7 +891,7 @@ class SailorViewModel : ViewModel() {
                 }
             }
             .onFailure {
-                _state.value = _state.value.copy(error = it.message)
+                _state.value = _state.value.copy(error = safeNetworkMessage("Unable to load race results", it))
             }
     }
 

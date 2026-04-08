@@ -40,9 +40,9 @@ Priority levels:
 ### Mobile
 - [x] Add explicit success feedback and per-section loading / empty / error states
 - [x] Add global network error handling, retries with backoff, and timeout/offline states
-- [ ] Store auth/session data securely at rest
-- [ ] Remove debug logs and PII from mobile logs/crash payloads
-- [ ] Create debug vs release configs for API base URL and feature flags
+- [x] Store auth/session data securely at rest
+- [x] Remove debug logs and PII from mobile logs/crash payloads
+- [x] Create debug vs release configs for API base URL and feature flags
 
 ---
 

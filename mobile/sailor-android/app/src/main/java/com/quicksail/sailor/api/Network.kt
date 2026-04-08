@@ -88,15 +88,10 @@ private class PersistentSecureCookieJar(context: Context) : CookieJar {
 }
 
 object Network {
-    // ADB reverse forwarding: phone connects to its own localhost:5000
-    // which tunnels over USB to Windows localhost:5000. No firewall needed.
-    // Switch to http://10.0.2.2:5000/ if using an emulator instead.
-    private const val BASE_URL = "http://127.0.0.1:5000/"
     private const val PREFS_NAME = "quicksail_secure_session"
     private const val PREF_LAST_PAGE = "last_home_page"
     private const val PREF_LAST_SCROLL = "last_scroll"
     private const val PREF_SAVED_USERNAME = "saved_username"
-    private const val PREF_SAVED_PASSWORD = "saved_password"
     private const val PREF_LAST_LOGIN_AT = "last_login_at"
     private const val PREF_ONBOARDING_DISMISSED_PREFIX = "onboarding_dismissed_"
     private const val PREF_CACHE_DASHBOARD = "cache_dashboard_json"
@@ -172,7 +167,7 @@ object Network {
             .callTimeout(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .addInterceptor(RetryOnFailureInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = if (BuildConfig.DEBUG)
+                level = if (BuildConfig.FEATURE_HTTP_BODY_LOGGING)
                     HttpLoggingInterceptor.Level.BODY
                 else
                     HttpLoggingInterceptor.Level.NONE
@@ -180,7 +175,7 @@ object Network {
             .build()
 
         api = Retrofit.Builder()
-            .baseUrl(BASE_URL)
+            .baseUrl(BuildConfig.API_BASE_URL)
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
@@ -204,22 +199,16 @@ object Network {
         return page to scroll
     }
 
-    /** Store credentials so a silent re-auth can be attempted within 24 hours. */
-    fun saveCredentials(username: String, password: String) {
+    /**
+     * Store non-sensitive login metadata only.
+     * Session continuity relies on encrypted persisted cookies, not saved passwords.
+     */
+    fun saveCredentials(username: String) {
         if (!initialized) return
         securePrefs.edit()
             .putString(PREF_SAVED_USERNAME, username)
-            .putString(PREF_SAVED_PASSWORD, password)
             .putLong(PREF_LAST_LOGIN_AT, System.currentTimeMillis())
             .apply()
-    }
-
-    /** Returns (username, password) if credentials are stored, otherwise null. */
-    fun loadCredentials(): Pair<String, String>? {
-        if (!initialized) return null
-        val username = securePrefs.getString(PREF_SAVED_USERNAME, null) ?: return null
-        val password = securePrefs.getString(PREF_SAVED_PASSWORD, null) ?: return null
-        return username to password
     }
 
     /** True if the last confirmed login was within the 24-hour window. */
@@ -234,7 +223,6 @@ object Network {
         if (!initialized) return
         securePrefs.edit()
             .remove(PREF_SAVED_USERNAME)
-            .remove(PREF_SAVED_PASSWORD)
             .remove(PREF_LAST_LOGIN_AT)
             .apply()
     }
@@ -447,6 +435,7 @@ object Network {
 
     private fun enqueuePendingAction(action: PendingAction) {
         if (!initialized) return
+        if (!BuildConfig.FEATURE_OFFLINE_QUEUE) return
         val actions = loadPendingActions().toMutableList()
         actions.add(action)
         persistPendingActions(actions)
