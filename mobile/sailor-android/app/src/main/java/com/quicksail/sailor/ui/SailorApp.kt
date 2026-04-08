@@ -661,6 +661,20 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                 when (homePage) {
                     HomePage.DASHBOARD -> DashboardPage(state, vm)
                     HomePage.PROFILE -> {
+                        if (!state.profileError.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Text(
+                                    state.profileError ?: "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
                         if (state.profileLoading && state.profile == null) {
                             SkeletonProfileSection()
                         } else {
@@ -680,6 +694,8 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                         BoatsSection(
                             boats = state.boats,
                             boatClasses = state.boatClasses,
+                            boatsLoading = state.boatsLoading,
+                            boatsError = state.profileError,
                             onAddBoatClick = { newSailNumber, boatClassId -> vm.createBoat(newSailNumber, boatClassId) },
                             onDeleteBoat = { vm.deleteBoat(it) },
                             onRefresh = { vm.refreshBoats() },
@@ -860,6 +876,21 @@ private fun OnboardingChecklistCard(
 @Composable
 private fun DashboardPage(state: SailorUiState, vm: SailorViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (!state.dashboardError.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
+                    .padding(12.dp)
+            ) {
+                Text(
+                    state.dashboardError ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+
         Text("Upcoming Races You Can Enter", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
         if (state.dashboardLoading && state.dashboardUpcomingRaces.isEmpty()) {
             repeat(2) {
@@ -1055,6 +1086,36 @@ private fun SeriesResultsPage(state: SailorUiState, vm: SailorViewModel) {
             TextButton(onClick = { vm.loadClubSeriesStandings() }) { Text("Refresh") }
         }
 
+        if (state.seriesLoading && state.clubSeriesStandings.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                    .padding(12.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("Loading series standings…", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            return@Column
+        }
+
+        if (!state.seriesError.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
+                    .padding(12.dp)
+            ) {
+                Text(
+                    state.seriesError ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+
         if (state.clubSeriesStandings.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -1191,6 +1252,8 @@ private fun SeriesSection(series: List<com.quicksail.sailor.api.SeriesSummary>) 
 private fun BoatsSection(
     boats: List<com.quicksail.sailor.api.SailorBoat>,
     boatClasses: List<com.quicksail.sailor.api.BoatClassSummary>,
+    boatsLoading: Boolean,
+    boatsError: String?,
     onAddBoatClick: (String, Long) -> Unit,
     onDeleteBoat: (Long) -> Unit,
     onRefresh: () -> Unit,
@@ -1203,7 +1266,36 @@ private fun BoatsSection(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("My Boats", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
 
-        if (boats.isEmpty()) {
+        if (!boatsError.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
+                    .padding(12.dp)
+            ) {
+                Text(
+                    boatsError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+
+        if (boatsLoading && boats.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                    .padding(12.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("Loading boats…", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        if (!boatsLoading && boats.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1620,6 +1712,21 @@ private fun RaceControlSection(state: SailorUiState, vm: SailorViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Race Control", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
 
+        if (!state.controlError.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
+                    .padding(12.dp)
+            ) {
+                Text(
+                    state.controlError ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1734,7 +1841,13 @@ private fun RaceControlSection(state: SailorUiState, vm: SailorViewModel) {
                     }
                 }
 
-                if (state.controlEntries.isEmpty()) {
+                if (state.controlLoading && state.controlEntries.isEmpty()) {
+                    Text(
+                        "Loading race-control entries…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                } else if (state.controlEntries.isEmpty()) {
                     Text(
                         "No entries loaded for this race.",
                         style = MaterialTheme.typography.bodySmall,

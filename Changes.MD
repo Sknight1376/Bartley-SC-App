@@ -38,8 +38,8 @@ Priority levels:
 - [x] Build a dedicated retrospective results workflow: create/select race → add/import entries → input finish data → preview standings → approve/publish → immutable audit revisions
 
 ### Mobile
-- [ ] Add explicit success feedback and per-section loading / empty / error states
-- [ ] Add global network error handling, retries with backoff, and timeout/offline states
+- [x] Add explicit success feedback and per-section loading / empty / error states
+- [x] Add global network error handling, retries with backoff, and timeout/offline states
 - [ ] Store auth/session data securely at rest
 - [ ] Remove debug logs and PII from mobile logs/crash payloads
 - [ ] Create debug vs release configs for API base URL and feature flags

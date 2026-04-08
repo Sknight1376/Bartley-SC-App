@@ -5,14 +5,21 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import com.quicksail.sailor.BuildConfig
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 
 private class PersistentSecureCookieJar(context: Context) : CookieJar {
     private val gson = Gson()
@@ -98,6 +105,41 @@ object Network {
     private const val PREF_CACHE_RACES_AT = "cache_races_at"
     private const val PREF_PENDING_ACTIONS = "pending_race_actions"
     private const val SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000L  // 24 hours
+    private const val CONNECT_TIMEOUT_SECONDS = 10L
+    private const val READ_TIMEOUT_SECONDS = 20L
+    private const val WRITE_TIMEOUT_SECONDS = 20L
+    private const val CALL_TIMEOUT_SECONDS = 30L
+    private const val MAX_NETWORK_RETRIES = 2
+
+    private class RetryOnFailureInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            val method = request.method.uppercase()
+            val retryableMethod = method == "GET" || method == "HEAD" || method == "OPTIONS"
+            if (!retryableMethod) {
+                return chain.proceed(request)
+            }
+
+            var attempt = 0
+            var lastException: IOException? = null
+
+            while (attempt <= MAX_NETWORK_RETRIES) {
+                try {
+                    return chain.proceed(request)
+                } catch (ioe: IOException) {
+                    lastException = ioe
+                    if (!Network.isTransientNetworkError(ioe) || attempt >= MAX_NETWORK_RETRIES) {
+                        throw ioe
+                    }
+                    val delayMs = (300L * (1 shl attempt)).coerceAtMost(1500L)
+                    Thread.sleep(delayMs)
+                    attempt += 1
+                }
+            }
+
+            throw lastException ?: IOException("Network request failed")
+        }
+    }
 
     private var initialized = false
     private lateinit var cookieJar: PersistentSecureCookieJar
@@ -124,6 +166,11 @@ object Network {
 
         val client: OkHttpClient = OkHttpClient.Builder()
             .cookieJar(cookieJar)
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .callTimeout(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .addInterceptor(RetryOnFailureInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = if (BuildConfig.DEBUG)
                     HttpLoggingInterceptor.Level.BODY
@@ -350,13 +397,24 @@ object Network {
     }
 
     fun isTransientNetworkError(throwable: Throwable?): Boolean {
-        val msg = throwable?.message?.lowercase() ?: return false
-        return msg.contains("timeout") ||
+        if (throwable == null) return false
+        if (throwable is SocketTimeoutException || throwable is UnknownHostException || throwable is ConnectException) {
+            return true
+        }
+        val msg = throwable.message?.lowercase().orEmpty()
+        return throwable is IOException ||
+            msg.contains("timeout") ||
             msg.contains("connection") ||
             msg.contains("failed to connect") ||
             msg.contains("unable to resolve host") ||
             msg.contains("network") ||
             msg.contains("unreachable")
+    }
+
+    fun isTimeoutError(throwable: Throwable?): Boolean {
+        if (throwable == null) return false
+        if (throwable is SocketTimeoutException) return true
+        return throwable.message?.contains("timeout", ignoreCase = true) == true
     }
 
     private suspend fun executePendingAction(action: PendingAction): Boolean {
