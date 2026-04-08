@@ -7,6 +7,7 @@ import com.quicksail.sailor.api.BoatClassSummary
 import com.quicksail.sailor.api.LeaderboardRow
 import com.quicksail.sailor.api.MobileLoginResponse
 import com.quicksail.sailor.api.Network
+import com.quicksail.sailor.api.RaceControlAddEntryRequest
 import com.quicksail.sailor.api.RaceControlEntry
 import com.quicksail.sailor.api.RaceControlLapRequest
 import com.quicksail.sailor.api.RaceControlRace
@@ -576,6 +577,52 @@ class SailorViewModel : ViewModel() {
             }
             .onFailure {
                 _state.value = _state.value.copy(error = it.message)
+            }
+    }
+
+    fun addControlEntry(
+        raceId: Long,
+        sailor: String,
+        boat: String,
+        sailNumber: String,
+        handicap: Int?
+    ) = viewModelScope.launch {
+        _state.value = _state.value.copy(controlLoading = true)
+        runCatching {
+            Network.api.controlAddEntry(
+                raceId,
+                RaceControlAddEntryRequest(
+                    sailor = sailor,
+                    boat = boat,
+                    sailNumber = sailNumber,
+                    handicap = handicap,
+                )
+            )
+        }
+            .onSuccess {
+                if (it.ok) {
+                    _state.value = _state.value.copy(
+                        controlLoading = false,
+                        feedback = FeedbackMessage.Success("Entry added")
+                    )
+                    loadControlEntries(raceId)
+                } else {
+                    _state.value = _state.value.copy(
+                        controlLoading = false,
+                        feedback = FeedbackMessage.Error(it.error ?: "Failed to add entry")
+                    )
+                }
+            }
+            .onFailure {
+                val msg = when {
+                    it.message?.contains("Connection") == true -> "Network error. Check your connection."
+                    it.message?.contains("Timeout") == true -> "Request timed out. Try again."
+                    else -> it.message ?: "Failed to add entry"
+                }
+                _state.value = _state.value.copy(
+                    controlLoading = false,
+                    feedback = FeedbackMessage.Error(msg)
+                )
             }
     }
 

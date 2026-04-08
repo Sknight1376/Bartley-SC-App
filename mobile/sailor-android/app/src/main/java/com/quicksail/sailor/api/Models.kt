@@ -220,6 +220,13 @@ data class RaceControlLapRequest(
     val is_finish: Boolean = false
 )
 
+data class RaceControlAddEntryRequest(
+    val sailor: String,
+    val boat: String,
+    val sailNumber: String,
+    val handicap: Int? = null
+)
+
 data class RaceSummaryRaceInfo(
     val race_no: Int,
     val club_name: String,

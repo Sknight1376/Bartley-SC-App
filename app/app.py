@@ -125,6 +125,7 @@ from club_dashboard_api import (
     dashboard_handicap_recommendations,
     dashboard_import_csv_apply,
     dashboard_import_csv_preview,
+    dashboard_landing_overview,
     dashboard_race_calendar,
     dashboard_results_review_queue,
     dashboard_sailors_boats,
@@ -784,6 +785,25 @@ def api_mobile_control_entries(race_id):
     return jsonify(payload), status
 
 
+@app.post("/api/mobile/races/<int:race_id>/control-entries")
+def api_mobile_control_add_entry(race_id):
+    guard = require_mobile_race_control_access(race_id)
+    if guard is not None:
+        return guard
+
+    payload, status = add_race_entry(
+        db,
+        race_id,
+        session.get("sailor_club_id"),
+        request.get_json(silent=True) or {},
+        get_actor_context(mobile=True),
+        race_is_locked,
+        create_race_revision,
+        write_race_audit,
+    )
+    return jsonify(payload), status
+
+
 @app.post("/api/mobile/races/<int:race_id>/control-start")
 def api_mobile_control_start(race_id):
     guard = require_mobile_race_control_access(race_id)
@@ -874,6 +894,15 @@ def api_dashboard_sailors_boats():
     if guard is not None:
         return guard
     payload, status = dashboard_sailors_boats(db, session.get("club_id"))
+    return jsonify(payload), status
+
+
+@app.get("/api/dashboard/landing-overview")
+def api_dashboard_landing_overview():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+    payload, status = dashboard_landing_overview(db, session.get("club_id"))
     return jsonify(payload), status
 
 

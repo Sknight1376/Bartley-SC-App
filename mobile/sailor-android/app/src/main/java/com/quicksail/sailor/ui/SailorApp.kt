@@ -1581,6 +1581,7 @@ private fun RaceRow(
 @Composable
 private fun RaceControlSection(state: SailorUiState, vm: SailorViewModel) {
     var raceExpanded by remember { mutableStateOf(false) }
+    var showAddEntryDialog by remember { mutableStateOf(false) }
     var startedAtMs by remember(state.selectedControlRaceId) { mutableStateOf<Long?>(null) }
     var elapsedSec by remember { mutableLongStateOf(0L) }
     val lapCounts = remember(state.selectedControlRaceId) { mutableStateMapOf<Long, Int>() }
@@ -1678,6 +1679,14 @@ private fun RaceControlSection(state: SailorUiState, vm: SailorViewModel) {
                         onClick = { vm.loadControlRaces() },
                         modifier = Modifier.weight(1f)
                     ) { Text("Refresh Races") }
+                }
+
+                if (state.selectedControlRaceId != null) {
+                    Button(
+                        onClick = { showAddEntryDialog = true },
+                        enabled = !state.controlLoading,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Add Boat Entry") }
                 }
 
                 if (state.controlRaceActive) {
@@ -1852,7 +1861,64 @@ private fun RaceControlSection(state: SailorUiState, vm: SailorViewModel) {
                 }
             }
         }
+
+        if (showAddEntryDialog) {
+            AddControlEntryDialog(
+                onDismiss = { showAddEntryDialog = false },
+                onSave = { sailor, boat, sailNumber, handicap ->
+                    val raceId = state.selectedControlRaceId ?: return@AddControlEntryDialog
+                    vm.addControlEntry(raceId, sailor, boat, sailNumber, handicap)
+                    showAddEntryDialog = false
+                }
+            )
+        }
     }
+}
+
+@Composable
+private fun AddControlEntryDialog(
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, Int?) -> Unit
+) {
+    var sailor by remember { mutableStateOf("") }
+    var boat by remember { mutableStateOf("") }
+    var sailNumber by remember { mutableStateOf("") }
+    var handicap by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Boat Entry") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Add a sailor/boat manually for this race when they have not signed in with the mobile app.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedTextField(value = sailor, onValueChange = { sailor = it }, label = { Text("Sailor") }, singleLine = true)
+                OutlinedTextField(value = boat, onValueChange = { boat = it }, label = { Text("Boat") }, singleLine = true)
+                OutlinedTextField(value = sailNumber, onValueChange = { sailNumber = it }, label = { Text("Sail number") }, singleLine = true)
+                OutlinedTextField(
+                    value = handicap,
+                    onValueChange = { handicap = it },
+                    label = { Text("Handicap (optional)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val parsedHandicap = handicap.trim().takeIf { it.isNotEmpty() }?.toIntOrNull()
+                    onSave(sailor.trim(), boat.trim(), sailNumber.trim(), parsedHandicap)
+                },
+                enabled = sailor.trim().isNotEmpty() && boat.trim().isNotEmpty() && sailNumber.trim().isNotEmpty()
+            ) { Text("Add") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 private fun raceDateLabel(startedAt: String?): String {

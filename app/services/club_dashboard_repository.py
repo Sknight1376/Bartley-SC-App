@@ -188,3 +188,72 @@ def get_export_results_rows(conn, race_id):
         '''),
         {"race_id": race_id},
     ).mappings().all()
+
+
+def get_latest_race_results_rows(conn, club_id, limit=5):
+    return conn.execute(
+        text('''
+            SELECT r.key AS race_id,
+                   r.race_no,
+                   sc.name AS series_name,
+                   r.started_at,
+                   re.sailor,
+                   re.boat,
+                   re.sail_number,
+                   MAX(CASE WHEN l.is_finish THEN l.position END) AS position,
+                   MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS corrected_sec
+            FROM "RACINGAPP"."RACE" r
+            JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+            JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
+            LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
+            WHERE r.club = :club_id
+              AND r.status = 'finished'
+            GROUP BY r.key, r.race_no, sc.name, r.started_at, re.sailor, re.boat, re.sail_number
+            ORDER BY r.started_at DESC NULLS LAST, position ASC NULLS LAST, corrected_sec ASC NULLS LAST
+            LIMIT :limit
+        '''),
+        {"club_id": club_id, "limit": int(limit)},
+    ).mappings().all()
+
+
+def get_club_summary_stats(conn, club_id):
+    return conn.execute(
+        text('''
+            WITH sailor_count AS (
+                SELECT COUNT(*) AS value
+                FROM "RACINGAPP"."SAILORCONTROL"
+                WHERE club = :club_id
+            ),
+            boat_count AS (
+                SELECT COUNT(*) AS value
+                FROM "RACINGAPP"."BOATCONTROL" bc
+                JOIN "RACINGAPP"."SAILORCONTROL" sc ON sc.key = bc.sailor
+                WHERE sc.club = :club_id
+            ),
+            recent_races AS (
+                SELECT COUNT(*) AS race_count,
+                       COALESCE(AVG(entry_count), 0) AS avg_turnout
+                FROM (
+                    SELECT r.key,
+                           COUNT(re.key) AS entry_count
+                    FROM "RACINGAPP"."RACE" r
+                    LEFT JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
+                    WHERE r.club = :club_id
+                      AND r.started_at >= NOW() - INTERVAL '90 days'
+                    GROUP BY r.key
+                ) x
+            ),
+            pending_reviews AS (
+                SELECT COUNT(*) AS value
+                FROM "RACINGAPP"."RACE" r
+                WHERE r.club = :club_id
+                  AND COALESCE(r.results_status, 'draft') <> 'locked'
+            )
+            SELECT (SELECT value FROM sailor_count) AS sailor_count,
+                   (SELECT value FROM boat_count) AS boat_count,
+                   (SELECT race_count FROM recent_races) AS recent_race_count,
+                   (SELECT avg_turnout FROM recent_races) AS avg_turnout,
+                   (SELECT value FROM pending_reviews) AS pending_review_count
+        '''),
+        {"club_id": club_id},
+    ).mappings().first()

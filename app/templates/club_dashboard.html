@@ -115,6 +115,34 @@
         </div>
         <div id="importStatus" class="muted"></div>
         <table class="dash-table" style="margin-top:10px;"><thead><tr><th>Sailor</th><th>Boat</th><th>Sail #</th><th>Elapsed</th><th>Corrected</th><th>Pos</th><th>DNF</th></tr></thead><tbody id="importRows"></tbody></table>
+
+        <div style="margin-top:24px; border-top:1px solid #eef1ff; padding-top:18px;">
+          <h4 style="margin:0 0 12px; color:#1331C5;">Manual Input for Hand-Captured Races</h4>
+          <div class="dash-controls">
+            <label>Existing Race ID <input type="number" id="manualRaceId" min="1" placeholder="Use existing race"></label>
+            <label>Series <select id="manualSeriesId"><option value="">Select series...</option></select></label>
+            <label>Race No <input type="number" id="manualRaceNo" min="1" placeholder="Optional"></label>
+            <label>Start <input type="datetime-local" id="manualStartedAt"></label>
+            <label>End <input type="datetime-local" id="manualEndedAt"></label>
+          </div>
+          <div class="dash-controls">
+            <input type="text" id="manualSailor" placeholder="Sailor name">
+            <input type="text" id="manualBoat" placeholder="Boat class/name">
+            <input type="text" id="manualSailNumber" placeholder="Sail number">
+            <input type="number" id="manualHandicap" placeholder="Handicap">
+            <input type="text" id="manualElapsed" placeholder="Elapsed HH:MM:SS">
+            <input type="text" id="manualCorrected" placeholder="Corrected HH:MM:SS">
+            <input type="number" id="manualPosition" min="1" placeholder="Position">
+            <label style="display:flex; align-items:center; gap:6px;">DNF <input type="checkbox" id="manualDnf"></label>
+            <button class="dash-nav-btn" id="addManualEntryBtn">Add Row</button>
+          </div>
+          <div class="dash-controls">
+            <button class="dash-nav-btn" id="saveManualRaceBtn">Create / Save Manual Race</button>
+            <button class="dash-nav-btn" id="clearManualEntriesBtn">Clear Rows</button>
+          </div>
+          <div id="manualImportStatus" class="muted"></div>
+          <table class="dash-table" style="margin-top:10px;"><thead><tr><th>Sailor</th><th>Boat</th><th>Sail #</th><th>HC</th><th>Elapsed</th><th>Corrected</th><th>Pos</th><th>DNF</th></tr></thead><tbody id="manualEntryRows"></tbody></table>
+        </div>
       </div>
     </section>
 

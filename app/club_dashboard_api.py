@@ -3,10 +3,12 @@ import io
 from datetime import date, timedelta
 
 from services.club_dashboard_repository import (
+    get_club_summary_stats,
     get_boat_class_usage,
     get_duty_roster_rows,
     get_export_results_rows,
     get_handicap_recommendation_rows,
+    get_latest_race_results_rows,
     get_race_calendar_rows,
     get_results_review_queue_rows,
     get_sailors_with_boats,
@@ -66,6 +68,37 @@ def dashboard_sailors_boats(db, club_id):
             "boat_classes": [dict(r) for r in classes],
         }
         return payload, 200
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}, 500
+
+
+def dashboard_landing_overview(db, club_id):
+    try:
+        with db.engine.connect() as conn:
+            latest_rows = get_latest_race_results_rows(conn, club_id)
+            stats = get_club_summary_stats(conn, club_id)
+
+        latest_results = []
+        for row in latest_rows:
+            latest_results.append(
+                {
+                    "race_id": row.get("race_id"),
+                    "race_no": row.get("race_no"),
+                    "series_name": row.get("series_name"),
+                    "started_at": row.get("started_at"),
+                    "sailor": row.get("sailor"),
+                    "boat": row.get("boat"),
+                    "sail_number": row.get("sail_number"),
+                    "position": row.get("position"),
+                    "corrected_time": _secs_to_hms(row.get("corrected_sec")),
+                }
+            )
+
+        return {
+            "ok": True,
+            "latest_results": latest_results,
+            "summary": dict(stats or {}),
+        }, 200
     except Exception as exc:
         return {"ok": False, "error": str(exc)}, 500
 

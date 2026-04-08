@@ -65,6 +65,12 @@ interface ApiService {
     @GET("api/mobile/races/{raceId}/control-entries")
     suspend fun controlEntries(@Path("raceId") raceId: Long): RaceControlEntriesResponse
 
+    @POST("api/mobile/races/{raceId}/control-entries")
+    suspend fun controlAddEntry(
+        @Path("raceId") raceId: Long,
+        @Body body: RaceControlAddEntryRequest
+    ): ApiResponse
+
     @POST("api/mobile/races/{raceId}/control-start")
     suspend fun controlStartRace(@Path("raceId") raceId: Long): RaceControlStartResponse
 

@@ -19,12 +19,20 @@
   <h4 style="color: #979797">Choose what you want to do next</h4>
 </div>
 
+<section style="width:990px; margin:18px auto 0; display:grid; grid-template-columns: 1.3fr 1fr; gap:18px;">
+  <div style="background:#fff; border:1px solid #dfe3fb; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.06); text-align:left;">
+    <h3 style="margin:0 0 12px; color:#1331C5;">Latest Race Results</h3>
+    <div id="latestResultsPanel" style="color:#6b7280;">Loading latest results...</div>
+  </div>
+  <div style="background:#fff; border:1px solid #dfe3fb; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.06); text-align:left;">
+    <h3 style="margin:0 0 12px; color:#1331C5;">Club Summary</h3>
+    <div id="clubSummaryPanel" style="color:#6b7280;">Loading summary...</div>
+  </div>
+</section>
+
 <div class="form-footer" style="display:flex; gap:20px; justify-content:center;">
   <button id="newRaceBtn" class="blue-button" style="left: 0; right: auto;">Start New Race</button>
-  <button id="membersBtn" class="blue-button" style="left: 33%; right: auto;">Manage Members</button>
-  <button id="dashboardBtn" class="blue-button" style="left: 50%; right: auto;">Club Dashboard</button>
-  <button id="seriesBtn" class="blue-button" style="left: 66%; right: auto;">Manage Series</button>
-  <button id="sailorPortalBtn" class="blue-button" style="left: 66%; right: auto;">Sailor Portal</button>
+  <button id="dashboardBtn" class="blue-button" style="left: 33%; right: auto;">Club Dashboard</button>
   <!-- <button id="testRaceBtn" class="blue-button" style="left: 25%; transform: translateX(-50%);">Open Test Race</button> -->
   <button id="logoutBtn" class="blue-button">Logout</button>
 </div>
@@ -34,21 +42,63 @@ document.getElementById('newRaceBtn').addEventListener('click', () => {
   window.location.href = '/club_entry';
 });
 
-document.getElementById('membersBtn').addEventListener('click', () => {
-  window.location.href = '/members';
-});
-
 document.getElementById('dashboardBtn').addEventListener('click', () => {
   window.location.href = '/club_dashboard';
 });
 
-document.getElementById('seriesBtn').addEventListener('click', () => {
-  window.location.href = '/series';
-});
+function esc(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
-document.getElementById('sailorPortalBtn').addEventListener('click', () => {
-  window.location.href = '/sailor_portal';
-});
+function formatDateTime(raw) {
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return esc(raw);
+  return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+}
+
+async function loadLandingOverview() {
+  const resultsPanel = document.getElementById('latestResultsPanel');
+  const summaryPanel = document.getElementById('clubSummaryPanel');
+  try {
+    const res = await fetch('/api/dashboard/landing-overview', { cache: 'no-store' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'Failed to load overview');
+    }
+
+    const results = data.latest_results || [];
+    resultsPanel.innerHTML = results.length
+      ? `<div style="display:grid; gap:10px;">${results.map(r => `
+          <div style="padding:10px; border:1px solid #eef1ff; border-radius:8px;">
+            <div style="font-weight:600; color:#1f2937;">${esc(r.series_name)} — Race #${esc(r.race_no)}</div>
+            <div style="font-size:13px; color:#6b7280;">${formatDateTime(r.started_at)}</div>
+            <div style="margin-top:6px;">${esc(r.sailor)} · ${esc(r.boat)} · Sail ${esc(r.sail_number)}</div>
+            <div style="font-size:13px; color:#1331C5; margin-top:4px;">Position ${esc(r.position ?? '—')} · Corrected ${esc(r.corrected_time || '—')}</div>
+          </div>
+        `).join('')}</div>`
+      : '<div style="color:#6b7280;">No recent finished races yet.</div>';
+
+    const summary = data.summary || {};
+    summaryPanel.innerHTML = `
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div style="padding:12px; border-radius:8px; background:#f6f8ff;"><div style="font-size:12px; color:#6b7280;">Sailors</div><div style="font-size:24px; font-weight:700; color:#1331C5;">${esc(summary.sailor_count ?? 0)}</div></div>
+        <div style="padding:12px; border-radius:8px; background:#f6f8ff;"><div style="font-size:12px; color:#6b7280;">Boats</div><div style="font-size:24px; font-weight:700; color:#1331C5;">${esc(summary.boat_count ?? 0)}</div></div>
+        <div style="padding:12px; border-radius:8px; background:#f6f8ff;"><div style="font-size:12px; color:#6b7280;">Avg turnout</div><div style="font-size:24px; font-weight:700; color:#1331C5;">${esc(Math.round(Number(summary.avg_turnout || 0) * 10) / 10)}</div></div>
+        <div style="padding:12px; border-radius:8px; background:#f6f8ff;"><div style="font-size:12px; color:#6b7280;">Pending reviews</div><div style="font-size:24px; font-weight:700; color:#1331C5;">${esc(summary.pending_review_count ?? 0)}</div></div>
+      </div>
+      <div style="margin-top:12px; font-size:13px; color:#6b7280;">Recent races analysed: ${esc(summary.recent_race_count ?? 0)} in the last 90 days.</div>
+    `;
+  } catch (err) {
+    resultsPanel.textContent = err.message || 'Failed to load latest results.';
+    summaryPanel.textContent = err.message || 'Failed to load summary.';
+  }
+}
 
 const testRaceBtn = document.getElementById('testRaceBtn');
 if (testRaceBtn) {
@@ -64,6 +114,8 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
   sessionStorage.clear();
   window.location.href = '/';
 });
+
+loadLandingOverview();
 </script>
 </body>
 </html>

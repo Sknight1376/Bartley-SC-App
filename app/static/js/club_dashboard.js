@@ -1,5 +1,6 @@
 (function () {
   const views = ["sailors", "calendar", "duties", "review", "handicap", "exports", "imports"];
+  const manualEntries = [];
 
   function esc(v) {
     return String(v ?? "")
@@ -29,6 +30,17 @@
 
   async function getJson(url) {
     const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || `Request failed: ${url}`);
+    return data;
+  }
+
+  async function postJson(url, body) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) throw new Error(data.error || `Request failed: ${url}`);
     return data;
@@ -122,6 +134,111 @@
     `).join("") || `<tr><td colspan="6" class="muted">No recommendations recorded yet</td></tr>`;
   }
 
+  async function loadSeriesOptions() {
+    const select = document.getElementById("manualSeriesId");
+    if (!select) return;
+    const data = await getJson("/api/series/manage");
+    select.innerHTML = `<option value="">Select series...</option>${(data.series || []).map((s) => `<option value="${esc(s.key || s.id)}">${esc(s.name)}${s.year ? ` (${esc(s.year)})` : ""}</option>`).join("")}`;
+  }
+
+  function renderManualEntries() {
+    const rows = document.getElementById("manualEntryRows");
+    if (!rows) return;
+    rows.innerHTML = manualEntries.map((e) => `
+      <tr>
+        <td>${esc(e.sailor)}</td>
+        <td>${esc(e.boat)}</td>
+        <td>${esc(e.sailNumber)}</td>
+        <td>${esc(e.handicap || "")}</td>
+        <td class="mono">${esc(e.elapsed_time || "")}</td>
+        <td class="mono">${esc(e.corrected_time || "")}</td>
+        <td>${esc(e.position || "")}</td>
+        <td>${e.dnf ? "YES" : ""}</td>
+      </tr>
+    `).join("") || `<tr><td colspan="8" class="muted">No manual rows added yet</td></tr>`;
+  }
+
+  function addManualEntry() {
+    const sailor = (document.getElementById("manualSailor").value || "").trim();
+    const boat = (document.getElementById("manualBoat").value || "").trim();
+    const sailNumber = (document.getElementById("manualSailNumber").value || "").trim();
+    const handicap = (document.getElementById("manualHandicap").value || "").trim();
+    const elapsed = (document.getElementById("manualElapsed").value || "").trim();
+    const corrected = (document.getElementById("manualCorrected").value || "").trim();
+    const position = (document.getElementById("manualPosition").value || "").trim();
+    const dnf = document.getElementById("manualDnf").checked;
+    const status = document.getElementById("manualImportStatus");
+
+    if (!sailor || !boat || !sailNumber) {
+      status.textContent = "Sailor, boat, and sail number are required.";
+      return;
+    }
+
+    manualEntries.push({
+      sailor,
+      boat,
+      sailNumber,
+      handicap: handicap ? Number(handicap) : undefined,
+      elapsed_time: elapsed || undefined,
+      corrected_time: corrected || undefined,
+      position: position ? Number(position) : undefined,
+      dnf,
+    });
+
+    ["manualSailor", "manualBoat", "manualSailNumber", "manualHandicap", "manualElapsed", "manualCorrected", "manualPosition"].forEach((id) => {
+      document.getElementById(id).value = "";
+    });
+    document.getElementById("manualDnf").checked = false;
+    status.textContent = `${manualEntries.length} manual row(s) ready.`;
+    renderManualEntries();
+  }
+
+  async function saveManualRace() {
+    const status = document.getElementById("manualImportStatus");
+    if (!manualEntries.length) {
+      status.textContent = "Add at least one row first.";
+      return;
+    }
+
+    const existingRaceId = (document.getElementById("manualRaceId").value || "").trim();
+    let raceId = existingRaceId;
+
+    try {
+      if (!raceId) {
+        const seriesId = (document.getElementById("manualSeriesId").value || "").trim();
+        const raceNo = (document.getElementById("manualRaceNo").value || "").trim();
+        const startedAt = (document.getElementById("manualStartedAt").value || "").trim();
+        const endedAt = (document.getElementById("manualEndedAt").value || "").trim();
+
+        if (!seriesId || !startedAt) {
+          status.textContent = "Select a series and start time, or provide an existing race ID.";
+          return;
+        }
+
+        const createPayload = {
+          series_id: Number(seriesId),
+          race_no: raceNo ? Number(raceNo) : undefined,
+          started_at: startedAt,
+          ended_at: endedAt || startedAt,
+          reason: "Manual hand-captured race entry",
+        };
+
+        const created = await postJson("/api/races/retrospective", createPayload);
+        raceId = created.race_id;
+      }
+
+      await postJson(`/api/races/${encodeURIComponent(raceId)}/retrospective/draft`, {
+        entries: manualEntries,
+        replace_existing: true,
+        reason: "Manual hand-captured race entry",
+      });
+
+      status.textContent = `Saved ${manualEntries.length} row(s) to race ${raceId}.`;
+    } catch (e) {
+      status.textContent = e.message || "Failed to save manual race.";
+    }
+  }
+
   async function exportResults() {
     const status = document.getElementById("exportStatus");
     const raceId = (document.getElementById("exportRaceId").value || "").trim();
@@ -200,6 +317,13 @@
   document.getElementById("exportResultsBtn").addEventListener("click", exportResults);
   document.getElementById("previewImportBtn").addEventListener("click", previewImport);
   document.getElementById("applyImportBtn").addEventListener("click", applyImport);
+  document.getElementById("addManualEntryBtn")?.addEventListener("click", addManualEntry);
+  document.getElementById("saveManualRaceBtn")?.addEventListener("click", saveManualRace);
+  document.getElementById("clearManualEntriesBtn")?.addEventListener("click", () => {
+    manualEntries.length = 0;
+    document.getElementById("manualImportStatus").textContent = "Manual rows cleared.";
+    renderManualEntries();
+  });
 
   (async function init() {
     try {
@@ -209,7 +333,9 @@
         loadDuties(),
         loadReviewQueue(),
         loadHandicapRecommendations(),
+        loadSeriesOptions(),
       ]);
+      renderManualEntries();
     } catch (e) {
       alert(e.message || "Failed to load dashboard");
     }

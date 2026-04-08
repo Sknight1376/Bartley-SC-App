@@ -1,0 +1,31 @@
+* text=auto
+
+# Cross-platform source files should stay LF for clean diffs in Windows and Linux
+*.py text eol=lf
+*.kt text eol=lf
+*.kts text eol=lf
+*.gradle text eol=lf
+*.properties text eol=lf
+*.xml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=lf
+
+# Windows command scripts should remain CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jar binary
+*.keystore binary
+*.jks binary
+*.apk binary
+*.aab binary
