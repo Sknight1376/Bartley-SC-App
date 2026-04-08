@@ -1,3 +1,4 @@
+from services.schema_validation import validate_member_boat_payload, validate_member_payload
 from services.members_repository import (
     get_boat_catalog,
     get_members_with_boats,
@@ -43,10 +44,13 @@ def members_list(db, club_id):
 
 
 def members_create(db, club_id, payload):
-    first_name = (payload.get("first_name") or "").strip()
-    last_name = (payload.get("last_name") or "").strip()
-    if not first_name:
-        return {"ok": False, "error": "first_name is required"}, 400
+    try:
+        validated = validate_member_payload(payload)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}, 400
+
+    first_name = validated["first_name"]
+    last_name = validated["last_name"]
 
     full_name = f"{first_name} {last_name}".strip()
 
@@ -59,10 +63,13 @@ def members_create(db, club_id, payload):
 
 
 def members_update(db, member_id, club_id, payload):
-    first_name = (payload.get("first_name") or "").strip()
-    last_name = (payload.get("last_name") or "").strip()
-    if not first_name:
-        return {"ok": False, "error": "first_name is required"}, 400
+    try:
+        validated = validate_member_payload(payload)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}, 400
+
+    first_name = validated["first_name"]
+    last_name = validated["last_name"]
 
     full_name = f"{first_name} {last_name}".strip()
 
@@ -89,10 +96,13 @@ def members_boat_catalog(db):
 
 
 def members_assign_boat(db, member_id, club_id, payload):
-    handicap_key = payload.get("handicap_key")
-    sail_number = (payload.get("sail_number") or "").strip()
-    if not handicap_key or not sail_number:
-        return {"ok": False, "error": "handicap_key and sail_number are required"}, 400
+    try:
+        validated = validate_member_boat_payload(payload)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}, 400
+
+    handicap_key = validated["handicap_key"]
+    sail_number = validated["sail_number"]
 
     try:
         with db.engine.begin() as conn:

@@ -44,7 +44,25 @@ from members_api import (
     members_list,
     members_update,
 )
-from series_management import list_series_rules, create_series_rule
+from series_management import (
+    create_exception,
+    create_series_basic,
+    create_series_rule,
+    create_series_with_schedule,
+    delete_exception,
+    delete_rule,
+    generate_series_schedule,
+    get_scoring,
+    get_series,
+    list_exceptions,
+    list_series,
+    list_series_races_view,
+    list_series_rules,
+    save_scoring,
+    update_exception,
+    update_rule,
+    update_series_metadata,
+)
 from race_control import (
     add_race_entry,
     delete_race_lap,
@@ -1523,46 +1541,14 @@ def api_series_manage_create_basic():
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-    year = (payload.get("year") or "").strip() or str(date.today().year)
-    name = (payload.get("name") or "").strip()
-
-    if not name:
-        return jsonify({"ok": False, "error": "Series name is required"}), 400
-
-    try:
-        with db.engine.begin() as conn:
-            exists = conn.execute(
-                text('''
-                    SELECT key
-                    FROM "RACINGAPP"."SERIESCONTROL"
-                    WHERE club = :club_id
-                      AND LOWER(name) = LOWER(:name)
-                      AND year = :year
-                    LIMIT 1
-                '''),
-                {"club_id": club_id, "name": name, "year": year}
-            ).scalar()
-
-            if exists:
-                return jsonify({"ok": False, "error": "Series already exists for this club/year"}), 409
-
-            series_id = conn.execute(
-                text('''
-                    INSERT INTO "RACINGAPP"."SERIESCONTROL" (key, year, name, club)
-                    VALUES (nextval('key'), :year, :name, :club)
-                    RETURNING key
-                '''),
-                {"year": year, "name": name, "club": club_id}
-            ).scalar()
-
-        session["series_setup_id"] = int(series_id)
-
-        return jsonify({"ok": True, "series_id": series_id})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = create_series_basic(
+        db,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+    )
+    if status == 200 and payload.get("ok") and payload.get("series_id"):
+        session["series_setup_id"] = int(payload["series_id"])
+    return jsonify(payload), status
 
 
 @app.get("/api/series/manage")
@@ -1571,36 +1557,8 @@ def api_series_manage_list():
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    try:
-        with db.engine.connect() as conn:
-            rows = conn.execute(
-                text('''
-                    SELECT s.key,
-                           s.year,
-                           s.name,
-                           COALESCE(r.total_races, 0) AS total_races,
-                           r.next_race_at,
-                           r.last_race_at
-                    FROM "RACINGAPP"."SERIESCONTROL" s
-                    LEFT JOIN (
-                        SELECT series,
-                               COUNT(*) AS total_races,
-                               MIN(started_at) FILTER (WHERE started_at >= NOW()) AS next_race_at,
-                               MAX(started_at) AS last_race_at
-                        FROM "RACINGAPP"."RACE"
-                        GROUP BY series
-                    ) r ON r.series = s.key
-                    WHERE s.club = :club_id
-                    ORDER BY s.year DESC NULLS LAST, s.name ASC
-                '''),
-                {"club_id": club_id}
-            ).mappings().all()
-
-        return jsonify({"ok": True, "series": [dict(r) for r in rows]})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = list_series(db, session.get("club_id"))
+    return jsonify(payload), status
 
 
 @app.get("/api/series/manage/<int:series_id>")
@@ -1609,26 +1567,8 @@ def api_series_manage_get(series_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    try:
-        with db.engine.connect() as conn:
-            row = conn.execute(
-                text('''
-                    SELECT key, year, name
-                    FROM "RACINGAPP"."SERIESCONTROL"
-                    WHERE key = :series_id
-                      AND club = :club_id
-                    LIMIT 1
-                '''),
-                {"series_id": series_id, "club_id": club_id}
-            ).mappings().first()
-
-        if not row:
-            return jsonify({"ok": False, "error": "Series not found"}), 404
-        return jsonify({"ok": True, "series": dict(row)})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = get_series(db, series_id, session.get("club_id"))
+    return jsonify(payload), status
 
 
 @app.post("/api/series/manage")
@@ -1637,112 +1577,12 @@ def api_series_manage_create():
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-    year = (payload.get("year") or "").strip()
-    name = (payload.get("name") or "").strip()
-    race_count = int(payload.get("race_count") or 0)
-    day_of_week = (payload.get("day_of_week") or "Saturday").strip().lower()
-    start_hour = int(payload.get("start_hour") or 11)
-    start_minute = int(payload.get("start_minute") or 0)
-    races_per_day = int(payload.get("races_per_day") or 1)
-    start_date_raw = (payload.get("start_date") or "").strip()
-
-    if not name:
-        return jsonify({"ok": False, "error": "Series name is required"}), 400
-    if not year:
-        return jsonify({"ok": False, "error": "Series year is required"}), 400
-    if race_count <= 0:
-        return jsonify({"ok": False, "error": "race_count must be greater than 0"}), 400
-    if races_per_day <= 0:
-        return jsonify({"ok": False, "error": "races_per_day must be greater than 0"}), 400
-    if not (0 <= start_hour <= 23 and 0 <= start_minute <= 59):
-        return jsonify({"ok": False, "error": "Invalid start time"}), 400
-
-    weekday_map = {
-        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-        "friday": 4, "saturday": 5, "sunday": 6
-    }
-    target_weekday = weekday_map.get(day_of_week)
-    if target_weekday is None:
-        return jsonify({"ok": False, "error": "Invalid day_of_week"}), 400
-
-    try:
-        if start_date_raw:
-            base_date = datetime.strptime(start_date_raw, "%Y-%m-%d").date()
-        else:
-            base_date = datetime.now().date()
-    except Exception:
-        return jsonify({"ok": False, "error": "start_date must be YYYY-MM-DD"}), 400
-
-    try:
-        with db.engine.begin() as conn:
-            exists = conn.execute(
-                text('''
-                    SELECT 1
-                    FROM "RACINGAPP"."SERIESCONTROL"
-                    WHERE club = :club_id
-                      AND LOWER(name) = LOWER(:name)
-                      AND year = :year
-                '''),
-                {"club_id": club_id, "name": name, "year": year}
-            ).scalar()
-
-            if exists:
-                return jsonify({"ok": False, "error": "Series already exists for this club/year"}), 409
-
-            series_id = conn.execute(
-                text('''
-                    INSERT INTO "RACINGAPP"."SERIESCONTROL" (key, year, name, club)
-                    VALUES (nextval('key'), :year, :name, :club)
-                    RETURNING key
-                '''),
-                {"year": year, "name": name, "club": club_id}
-            ).scalar()
-
-            max_race_no = conn.execute(
-                text('SELECT COALESCE(MAX(race_no), 0) FROM "RACINGAPP"."RACE" WHERE series = :series_id'),
-                {"series_id": series_id}
-            ).scalar() or 0
-
-            # Build schedule: e.g. Saturdays 11:00 with optional multiple races/day.
-            days_to_add = (target_weekday - base_date.weekday()) % 7
-            next_race_date = base_date + timedelta(days=days_to_add)
-
-            created = 0
-            race_no = int(max_race_no)
-            while created < race_count:
-                for slot in range(races_per_day):
-                    if created >= race_count:
-                        break
-
-                    race_no += 1
-                    slot_minutes = slot * 10
-                    scheduled_at = datetime.combine(
-                        next_race_date,
-                        time(hour=start_hour, minute=start_minute)
-                    ) + timedelta(minutes=slot_minutes)
-
-                    conn.execute(
-                        text('''
-                            INSERT INTO "RACINGAPP"."RACE" (key, club, series, race_no, status, started_at, ended_at)
-                            VALUES (nextval('key'), :club, :series, :race_no, 'not_started', :started_at, NULL)
-                        '''),
-                        {
-                            "club": club_id,
-                            "series": series_id,
-                            "race_no": race_no,
-                            "started_at": scheduled_at
-                        }
-                    )
-                    created += 1
-
-                next_race_date = next_race_date + timedelta(days=7)
-
-        return jsonify({"ok": True, "series_id": series_id, "scheduled_races": race_count})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = create_series_with_schedule(
+        db,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+    )
+    return jsonify(payload), status
 
 
 @app.put("/api/series/manage/<int:series_id>")
@@ -1751,48 +1591,15 @@ def api_series_manage_update(series_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-    year = (payload.get("year") or "").strip() or None
-    name = (payload.get("name") or "").strip()
-
-    if not name:
-        return jsonify({"ok": False, "error": "Series name is required"}), 400
-
-    try:
-        with db.engine.begin() as conn:
-            # If no year supplied, keep the existing one stored in the DB
-            if year is None:
-                existing = conn.execute(
-                    text('''
-                        SELECT year FROM "RACINGAPP"."SERIESCONTROL"
-                        WHERE key = :series_id AND club = :club_id
-                        LIMIT 1
-                    '''),
-                    {"series_id": series_id, "club_id": club_id}
-                ).scalar()
-                year = existing or str(date.today().year)
-
-            updated = conn.execute(
-                text('''
-                    UPDATE "RACINGAPP"."SERIESCONTROL"
-                    SET year = :year,
-                        name = :name
-                    WHERE key = :series_id
-                      AND club = :club_id
-                '''),
-                {"year": year, "name": name, "series_id": series_id, "club_id": club_id}
-            )
-
-        if updated.rowcount == 0:
-            return jsonify({"ok": False, "error": "Series not found"}), 404
-
+    payload, status = update_series_metadata(
+        db,
+        series_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+    )
+    if status == 200 and payload.get("ok"):
         session["series_setup_id"] = int(series_id)
-
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify(payload), status
 
 
 @app.get("/api/series/manage/<int:series_id>/rules")
@@ -1840,96 +1647,22 @@ def api_series_manage_rules_update(series_id, rule_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-
-    try:
-        weekday = parse_weekday(payload.get("weekday"))
-        start_time = parse_time_hh_mm(payload.get("start_time"), "start_time")
-        cadence_weeks = int(payload.get("cadence_weeks") or 1)
-        races_per_day = int(payload.get("races_per_day") or 1)
-        target_race_count = int(payload.get("race_count") or 0)
-        additional_times = parse_time_list_hh_mm(payload.get("additional_start_times"), "additional_start_times")
-        valid_from = parse_date_yyyy_mm_dd(payload.get("valid_from"), "valid_from")
-        valid_to_raw = (payload.get("valid_to") or "").strip()
-        is_active = bool(payload.get("is_active", True))
-
-        valid_to = parse_date_yyyy_mm_dd(valid_to_raw, "valid_to") if valid_to_raw else None
-
-        if cadence_weeks < 1 or races_per_day < 1:
-            return jsonify({"ok": False, "error": "cadence_weeks and races_per_day must be > 0"}), 400
-        if target_race_count < 0:
-            return jsonify({"ok": False, "error": "race_count cannot be negative"}), 400
-        if target_race_count > 0:
-            valid_to = calculate_rule_end_date(valid_from, weekday, cadence_weeks, races_per_day, target_race_count)
-        if not valid_to:
-            return jsonify({"ok": False, "error": "Provide race_count (>0) or valid_to"}), 400
-        if valid_to and valid_to < valid_from:
-            return jsonify({"ok": False, "error": "valid_to cannot be before valid_from"}), 400
-        if races_per_day > 1 and len(additional_times) != (races_per_day - 1):
-            return jsonify({
-                "ok": False,
-                "error": f"Provide exactly {races_per_day - 1} additional_start_times value(s) in HH:MM"
-            }), 400
-
-        extra_start_times = ",".join([t.strftime("%H:%M") for t in additional_times]) if additional_times else None
-
-        with db.engine.begin() as conn:
-            ensure_series_schedule_tables(conn)
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            conn.execute(
-                text('''
-                    UPDATE "RACINGAPP"."SERIESCONTROL"
-                    SET year = :year
-                    WHERE key = :series_id
-                      AND club = :club_id
-                '''),
-                {"year": str(valid_from.year), "series_id": series_id, "club_id": club_id}
-            )
-
-            updated = conn.execute(
-                text('''
-                    UPDATE "RACINGAPP"."SERIES_RULE"
-                    SET weekday = :weekday,
-                        start_time = :start_time,
-                        cadence_weeks = :cadence_weeks,
-                        races_per_day = :races_per_day,
-                        target_race_count = :target_race_count,
-                        extra_start_times = :extra_start_times,
-                        valid_from = :valid_from,
-                        valid_to = :valid_to,
-                        is_active = :is_active
-                    WHERE key = :rule_id
-                      AND series = :series_id
-                '''),
-                {
-                    "weekday": weekday,
-                    "start_time": start_time,
-                    "cadence_weeks": cadence_weeks,
-                    "races_per_day": races_per_day,
-                    "target_race_count": target_race_count if target_race_count > 0 else None,
-                    "extra_start_times": extra_start_times,
-                    "valid_from": valid_from,
-                    "valid_to": valid_to,
-                    "is_active": is_active,
-                    "rule_id": rule_id,
-                    "series_id": series_id,
-                }
-            )
-
-            if updated.rowcount == 0:
-                return jsonify({"ok": False, "error": "Rule not found"}), 404
-
-            recompute_series_rule_end_dates(conn, series_id)
-
-        return jsonify({"ok": True, "rule_id": rule_id})
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = update_rule(
+        db,
+        request.get_json(silent=True) or {},
+        series_id,
+        rule_id,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+        check_series_access,
+        parse_weekday,
+        parse_time_hh_mm,
+        parse_time_list_hh_mm,
+        parse_date_yyyy_mm_dd,
+        calculate_rule_end_date,
+        recompute_series_rule_end_dates,
+    )
+    return jsonify(payload), status
 
 
 @app.delete("/api/series/manage/<int:series_id>/rules/<int:rule_id>")
@@ -1938,28 +1671,15 @@ def api_series_manage_rules_delete(series_id, rule_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    try:
-        with db.engine.begin() as conn:
-            ensure_series_schedule_tables(conn)
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            deleted = conn.execute(
-                text('''
-                    DELETE FROM "RACINGAPP"."SERIES_RULE"
-                    WHERE key = :rule_id
-                      AND series = :series_id
-                '''),
-                {"rule_id": rule_id, "series_id": series_id}
-            )
-
-        if deleted.rowcount == 0:
-            return jsonify({"ok": False, "error": "Rule not found"}), 404
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = delete_rule(
+        db,
+        series_id,
+        rule_id,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+        check_series_access,
+    )
+    return jsonify(payload), status
 
 
 @app.get("/api/series/manage/<int:series_id>/exceptions")
@@ -1968,28 +1688,14 @@ def api_series_manage_exceptions_list(series_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    try:
-        with db.engine.connect() as conn:
-            ensure_series_schedule_tables(conn)
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            rows = conn.execute(
-                text('''
-                                        SELECT key, COALESCE(exception_date, DATE(original_start_at)) AS exception_date, note, is_active
-                    FROM "RACINGAPP"."SERIES_EXCEPTION"
-                    WHERE series = :series_id
-                                            AND exception_type = 'cancel'
-                                        ORDER BY COALESCE(exception_date, DATE(original_start_at)) ASC, key ASC
-                '''),
-                {"series_id": series_id}
-            ).mappings().all()
-
-        return jsonify({"ok": True, "exceptions": [dict(r) for r in rows]})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = list_exceptions(
+        db,
+        series_id,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+        check_series_access,
+    )
+    return jsonify(payload), status
 
 
 @app.post("/api/series/manage/<int:series_id>/exceptions")
@@ -1998,48 +1704,17 @@ def api_series_manage_exceptions_create(series_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-    ex_date_raw = (payload.get("exception_date") or "").strip()
-    note = (payload.get("note") or "").strip() or None
-    is_active = bool(payload.get("is_active", True))
-
-    try:
-        if not ex_date_raw:
-            return jsonify({"ok": False, "error": "exception_date is required"}), 400
-        exception_date = parse_date_yyyy_mm_dd(ex_date_raw, "exception_date")
-        original_start_at = datetime.combine(exception_date, time(0, 0))
-
-        with db.engine.begin() as conn:
-            ensure_series_schedule_tables(conn)
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            exception_id = conn.execute(
-                text('''
-                    INSERT INTO "RACINGAPP"."SERIES_EXCEPTION"
-                        (key, series, exception_type, exception_date, original_start_at, override_start_at, note, is_active)
-                    VALUES
-                        (nextval('key'), :series, 'cancel', :exception_date, :original_start_at, NULL, :note, :is_active)
-                    RETURNING key
-                '''),
-                {
-                    "series": series_id,
-                    "exception_date": exception_date,
-                    "original_start_at": original_start_at,
-                    "note": note,
-                    "is_active": is_active
-                }
-            ).scalar()
-
-            recompute_series_rule_end_dates(conn, series_id)
-
-        return jsonify({"ok": True, "exception_id": exception_id})
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = create_exception(
+        db,
+        request.get_json(silent=True) or {},
+        series_id,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+        check_series_access,
+        parse_date_yyyy_mm_dd,
+        recompute_series_rule_end_dates,
+    )
+    return jsonify(payload), status
 
 
 @app.put("/api/series/manage/<int:series_id>/exceptions/<int:exception_id>")
@@ -2048,55 +1723,18 @@ def api_series_manage_exceptions_update(series_id, exception_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-    ex_date_raw = (payload.get("exception_date") or "").strip()
-    note = (payload.get("note") or "").strip() or None
-    is_active = bool(payload.get("is_active", True))
-
-    try:
-        if not ex_date_raw:
-            return jsonify({"ok": False, "error": "exception_date is required"}), 400
-        exception_date = parse_date_yyyy_mm_dd(ex_date_raw, "exception_date")
-        original_start_at = datetime.combine(exception_date, time(0, 0))
-
-        with db.engine.begin() as conn:
-            ensure_series_schedule_tables(conn)
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            updated = conn.execute(
-                text('''
-                    UPDATE "RACINGAPP"."SERIES_EXCEPTION"
-                    SET exception_date = :exception_date,
-                        original_start_at = :original_start_at,
-                        note = :note,
-                        is_active = :is_active
-                    WHERE key = :exception_id
-                      AND series = :series_id
-                      AND exception_type = 'cancel'
-                '''),
-                {
-                    "exception_date": exception_date,
-                    "original_start_at": original_start_at,
-                    "note": note,
-                    "is_active": is_active,
-                    "exception_id": exception_id,
-                    "series_id": series_id,
-                }
-            )
-
-            if updated.rowcount == 0:
-                return jsonify({"ok": False, "error": "Exception not found"}), 404
-
-            recompute_series_rule_end_dates(conn, series_id)
-
-        return jsonify({"ok": True, "exception_id": exception_id})
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = update_exception(
+        db,
+        request.get_json(silent=True) or {},
+        series_id,
+        exception_id,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+        check_series_access,
+        parse_date_yyyy_mm_dd,
+        recompute_series_rule_end_dates,
+    )
+    return jsonify(payload), status
 
 
 @app.delete("/api/series/manage/<int:series_id>/exceptions/<int:exception_id>")
@@ -2105,32 +1743,16 @@ def api_series_manage_exceptions_delete(series_id, exception_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    try:
-        with db.engine.begin() as conn:
-            ensure_series_schedule_tables(conn)
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            deleted = conn.execute(
-                text('''
-                    DELETE FROM "RACINGAPP"."SERIES_EXCEPTION"
-                    WHERE key = :exception_id
-                      AND series = :series_id
-                      AND exception_type = 'cancel'
-                '''),
-                {"exception_id": exception_id, "series_id": series_id}
-            )
-
-            if deleted.rowcount == 0:
-                return jsonify({"ok": False, "error": "Exception not found"}), 404
-
-            recompute_series_rule_end_dates(conn, series_id)
-
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = delete_exception(
+        db,
+        series_id,
+        exception_id,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+        check_series_access,
+        recompute_series_rule_end_dates,
+    )
+    return jsonify(payload), status
 
 
 @app.get("/api/series/manage/<int:series_id>/scoring")
@@ -2139,48 +1761,14 @@ def api_series_manage_scoring_get(series_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    try:
-        with db.engine.connect() as conn:
-            ensure_series_schedule_tables(conn)
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            row = conn.execute(
-                text('''
-                    SELECT scoring_system, races_to_count, discard_after_races, discards_allowed
-                    FROM "RACINGAPP"."SERIES_SCORING"
-                    WHERE series = :series
-                '''),
-                {"series": series_id}
-            ).mappings().first()
-
-            discard_rows = conn.execute(
-                text('''
-                    SELECT discard_count, after_races
-                    FROM "RACINGAPP"."SERIES_SCORING_DISCARD"
-                    WHERE series = :series
-                    ORDER BY discard_count ASC
-                '''),
-                {"series": series_id}
-            ).mappings().all()
-
-        default_cfg = {
-            "scoring_system": "low_point",
-            "discard_rules": []
-        }
-
-        scoring = dict(row) if row else default_cfg
-        scoring["scoring_system"] = "low_point"
-        scoring["discard_rules"] = [dict(r) for r in discard_rows]
-        scoring.pop("races_to_count", None)
-        scoring.pop("discard_after_races", None)
-        scoring.pop("discards_allowed", None)
-
-        return jsonify({"ok": True, "scoring": scoring})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = get_scoring(
+        db,
+        series_id,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+        check_series_access,
+    )
+    return jsonify(payload), status
 
 
 @app.post("/api/series/manage/<int:series_id>/scoring")
@@ -2189,85 +1777,15 @@ def api_series_manage_scoring_save(series_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-    discard_rules = payload.get("discard_rules") or []
-
-    try:
-        normalized = []
-        seen_counts = set()
-
-        for item in discard_rules:
-            discard_count = int(item.get("discard_count"))
-            after_races = int(item.get("after_races"))
-
-            if discard_count < 1:
-                return jsonify({"ok": False, "error": "discard_count must be >= 1"}), 400
-            if after_races < 1:
-                return jsonify({"ok": False, "error": "after_races must be >= 1"}), 400
-            if discard_count in seen_counts:
-                return jsonify({"ok": False, "error": "duplicate discard_count values are not allowed"}), 400
-
-            seen_counts.add(discard_count)
-            normalized.append({"discard_count": discard_count, "after_races": after_races})
-
-        normalized.sort(key=lambda x: x["discard_count"])
-        prev_after = 0
-        for idx, item in enumerate(normalized, start=1):
-            if item["discard_count"] != idx:
-                return jsonify({"ok": False, "error": "discard_count must be sequential starting at 1"}), 400
-            if item["after_races"] <= prev_after:
-                return jsonify({"ok": False, "error": "after_races must increase for each discard rule"}), 400
-            prev_after = item["after_races"]
-
-        with db.engine.begin() as conn:
-            ensure_series_schedule_tables(conn)
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            conn.execute(
-                text('''
-                    INSERT INTO "RACINGAPP"."SERIES_SCORING"
-                        (series, scoring_system, races_to_count, discard_after_races, discards_allowed, updated_at)
-                    VALUES
-                        (:series, 'low_point', NULL, NULL, 0, CURRENT_TIMESTAMP)
-                    ON CONFLICT (series)
-                    DO UPDATE SET
-                        scoring_system = 'low_point',
-                        races_to_count = NULL,
-                        discard_after_races = NULL,
-                        discards_allowed = 0,
-                        updated_at = CURRENT_TIMESTAMP
-                '''),
-                {"series": series_id}
-            )
-
-            conn.execute(
-                text('DELETE FROM "RACINGAPP"."SERIES_SCORING_DISCARD" WHERE series = :series'),
-                {"series": series_id}
-            )
-
-            for item in normalized:
-                conn.execute(
-                    text('''
-                        INSERT INTO "RACINGAPP"."SERIES_SCORING_DISCARD"
-                            (key, series, discard_count, after_races, created_at, updated_at)
-                        VALUES
-                            (nextval('key'), :series, :discard_count, :after_races, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    '''),
-                    {
-                        "series": series_id,
-                        "discard_count": item["discard_count"],
-                        "after_races": item["after_races"],
-                    }
-                )
-
-        return jsonify({"ok": True})
-    except ValueError:
-        return jsonify({"ok": False, "error": "Invalid numeric scoring values"}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = save_scoring(
+        db,
+        request.get_json(silent=True) or {},
+        series_id,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+        check_series_access,
+    )
+    return jsonify(payload), status
 
 
 @app.post("/api/series/manage/<int:series_id>/generate")
@@ -2276,35 +1794,16 @@ def api_series_manage_generate(series_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-
-    try:
-        from_raw = (payload.get("from_date") or "").strip()
-        to_raw = (payload.get("to_date") or "").strip()
-        from_date = parse_date_yyyy_mm_dd(from_raw, "from_date") if from_raw else date.today()
-        to_date = parse_date_yyyy_mm_dd(to_raw, "to_date") if to_raw else (from_date + timedelta(days=120))
-
-        if to_date < from_date:
-            return jsonify({"ok": False, "error": "to_date cannot be before from_date"}), 400
-
-        with db.engine.begin() as conn:
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-            summary = generate_series_races(conn, series_id, club_id, from_date, to_date)
-
-        return jsonify({
-            "ok": True,
-            "series_id": series_id,
-            "from_date": from_date.isoformat(),
-            "to_date": to_date.isoformat(),
-            **summary
-        })
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = generate_series_schedule(
+        db,
+        request.get_json(silent=True) or {},
+        series_id,
+        session.get("club_id"),
+        parse_date_yyyy_mm_dd,
+        check_series_access,
+        generate_series_races,
+    )
+    return jsonify(payload), status
 
 
 @app.get("/api/series/manage/<int:series_id>/races")
@@ -2313,33 +1812,13 @@ def api_series_manage_races_list(series_id):
     if guard is not None:
         return guard
 
-    club_id = session.get("club_id")
-
-    try:
-        with db.engine.connect() as conn:
-            if not check_series_access(conn, series_id, club_id):
-                return jsonify({"ok": False, "error": "Series not found"}), 404
-
-            rows = conn.execute(
-                text('''
-                    SELECT key, race_no, status, started_at
-                    FROM "RACINGAPP"."RACE"
-                    WHERE series = :series_id
-                    ORDER BY started_at ASC, race_no ASC
-                '''),
-                {"series_id": series_id}
-            ).mappings().all()
-
-        races = []
-        for r in rows:
-            item = dict(r)
-            if item.get("started_at") is not None:
-                item["started_at"] = item["started_at"].isoformat()
-            races.append(item)
-
-        return jsonify({"ok": True, "races": races})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = list_series_races_view(
+        db,
+        series_id,
+        session.get("club_id"),
+        check_series_access,
+    )
+    return jsonify(payload), status
 
 
 @app.get("/club_entry")

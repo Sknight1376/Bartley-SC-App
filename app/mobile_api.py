@@ -1,5 +1,12 @@
 from datetime import datetime, timedelta
 
+from services.schema_validation import (
+    validate_mobile_create_boat_payload,
+    validate_mobile_join_race_payload,
+    validate_mobile_login_payload,
+    validate_mobile_profile_update_payload,
+    validate_mobile_register_payload,
+)
 from services.mobile_repository import (
     authenticate_sailor,
     check_race_entry_exists,
@@ -82,15 +89,14 @@ def build_control_access_response(db, session_dict, sailor_has_active_role):
 # ---------------------------------------------------------------------------
 
 def mobile_login(db, payload, grant_sailor_role, set_mobile_session):
-    username = (payload.get("username") or "").strip()
-    password = payload.get("password") or ""
-
-    if not username or not password:
-        return {"ok": False, "error": "Missing username or password"}, 400
+    try:
+        validated = validate_mobile_login_payload(payload)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}, 400
 
     try:
         with db.engine.begin() as conn:
-            sailor_user = authenticate_sailor(conn, username, password)
+            sailor_user = authenticate_sailor(conn, validated["username"], validated["password"])
             if not sailor_user:
                 return {"ok": False, "error": "Invalid username or password"}, 401
 
@@ -125,14 +131,16 @@ def mobile_login(db, payload, grant_sailor_role, set_mobile_session):
 
 
 def mobile_register(db, payload, grant_sailor_role, set_mobile_session):
-    username = (payload.get("username") or "").strip()
-    password = payload.get("password") or ""
-    first_name = (payload.get("first_name") or "").strip()
-    last_name = (payload.get("last_name") or "").strip()
-    club_id = payload.get("club_id")
+    try:
+        validated = validate_mobile_register_payload(payload)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}, 400
 
-    if not username or not password or not first_name:
-        return {"ok": False, "error": "username, password, and first_name are required"}, 400
+    username = validated["username"]
+    password = validated["password"]
+    first_name = validated["first_name"]
+    last_name = validated["last_name"]
+    club_id = validated["club_id"]
 
     full_name = f"{first_name} {last_name}".strip()
 
@@ -207,12 +215,14 @@ def mobile_me(db, sailor_id, username):
 
 
 def mobile_update_me(db, sailor_id, payload, session_dict):
-    first_name = (payload.get("first_name") or "").strip()
-    last_name = (payload.get("last_name") or "").strip()
-    club_id = payload.get("club_id")
+    try:
+        validated = validate_mobile_profile_update_payload(payload)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}, 400
 
-    if not first_name:
-        return {"ok": False, "error": "first_name is required"}, 400
+    first_name = validated["first_name"]
+    last_name = validated["last_name"]
+    club_id = validated["club_id"]
 
     full_name = f"{first_name} {last_name}".strip()
 
@@ -283,13 +293,13 @@ def mobile_boat_classes(db):
 
 
 def mobile_create_boat(db, sailor_id, payload):
-    sail_number = (payload.get("sail_number") or "").strip()
-    boat_class_id = payload.get("boat_class_id")
+    try:
+        validated = validate_mobile_create_boat_payload(payload)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}, 400
 
-    if not sail_number:
-        return {"ok": False, "error": "sail_number is required"}, 400
-    if boat_class_id in (None, "", "null"):
-        return {"ok": False, "error": "boat_class_id is required"}, 400
+    sail_number = validated["sail_number"]
+    boat_class_id = validated["boat_class_id"]
 
     try:
         with db.engine.begin() as conn:
@@ -410,9 +420,12 @@ def mobile_series_standings(db, sailor_id, session_dict):
 # ---------------------------------------------------------------------------
 
 def mobile_join_race(db, race_id, club_id, sailor_id, payload):
-    boat_key = payload.get("boat_key")
-    if not boat_key:
-        return {"ok": False, "error": "boat_key is required"}, 400
+    try:
+        validated = validate_mobile_join_race_payload(payload)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}, 400
+
+    boat_key = validated["boat_key"]
 
     try:
         with db.engine.begin() as conn:

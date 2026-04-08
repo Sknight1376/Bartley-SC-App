@@ -59,3 +59,131 @@ def validate_lap_payload(payload, parse_hms_to_seconds):
         "position": position,
         "is_finish": is_finish,
     }
+
+
+def validate_mobile_login_payload(payload):
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    if not username or not password:
+        raise ValueError("Missing username or password")
+    return {"username": username, "password": password}
+
+
+def validate_mobile_register_payload(payload):
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    first_name = (payload.get("first_name") or "").strip()
+    last_name = (payload.get("last_name") or "").strip()
+    club_id = payload.get("club_id")
+
+    if not username or not password or not first_name:
+        raise ValueError("username, password, and first_name are required")
+
+    return {
+        "username": username,
+        "password": password,
+        "first_name": first_name,
+        "last_name": last_name,
+        "club_id": club_id,
+    }
+
+
+def validate_mobile_profile_update_payload(payload):
+    first_name = (payload.get("first_name") or "").strip()
+    last_name = (payload.get("last_name") or "").strip()
+    club_id = payload.get("club_id")
+    if not first_name:
+        raise ValueError("first_name is required")
+    return {"first_name": first_name, "last_name": last_name, "club_id": club_id}
+
+
+def validate_mobile_create_boat_payload(payload):
+    boat_class_id = payload.get("boat_class_id")
+    sail_number = (payload.get("sail_number") or "").strip()
+    if not boat_class_id or not sail_number:
+        raise ValueError("boat_class_id and sail_number are required")
+    return {"boat_class_id": boat_class_id, "sail_number": sail_number}
+
+
+def validate_mobile_join_race_payload(payload):
+    boat_key = payload.get("boat_key")
+    if not boat_key:
+        raise ValueError("boat_key is required")
+    return {"boat_key": boat_key}
+
+
+def validate_member_payload(payload):
+    first_name = (payload.get("first_name") or "").strip()
+    last_name = (payload.get("last_name") or "").strip()
+    if not first_name:
+        raise ValueError("first_name is required")
+    return {"first_name": first_name, "last_name": last_name}
+
+
+def validate_member_boat_payload(payload):
+    handicap_key = payload.get("handicap_key")
+    sail_number = (payload.get("sail_number") or "").strip()
+    if not handicap_key or not sail_number:
+        raise ValueError("handicap_key and sail_number are required")
+    return {"handicap_key": handicap_key, "sail_number": sail_number}
+
+
+def validate_series_basic_payload(payload, default_year):
+    year = (payload.get("year") or "").strip() or str(default_year)
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise ValueError("Series name is required")
+    return {"year": year, "name": name}
+
+
+def validate_series_update_payload(payload):
+    year = (payload.get("year") or "").strip() or None
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise ValueError("Series name is required")
+    return {"year": year, "name": name}
+
+
+def validate_series_exception_payload(payload, parse_date_yyyy_mm_dd):
+    ex_date_raw = (payload.get("exception_date") or "").strip()
+    note = (payload.get("note") or "").strip() or None
+    is_active = bool(payload.get("is_active", True))
+    if not ex_date_raw:
+        raise ValueError("exception_date is required")
+    exception_date = parse_date_yyyy_mm_dd(ex_date_raw, "exception_date")
+    return {
+        "exception_date": exception_date,
+        "note": note,
+        "is_active": is_active,
+    }
+
+
+def validate_series_scoring_payload(payload):
+    discard_rules = payload.get("discard_rules") or []
+    normalized = []
+    seen_counts = set()
+
+    for item in discard_rules:
+        discard_count = int(item.get("discard_count"))
+        after_races = int(item.get("after_races"))
+
+        if discard_count < 1:
+            raise ValueError("discard_count must be >= 1")
+        if after_races < 1:
+            raise ValueError("after_races must be >= 1")
+        if discard_count in seen_counts:
+            raise ValueError("duplicate discard_count values are not allowed")
+
+        seen_counts.add(discard_count)
+        normalized.append({"discard_count": discard_count, "after_races": after_races})
+
+    normalized.sort(key=lambda x: x["discard_count"])
+    prev_after = 0
+    for idx, item in enumerate(normalized, start=1):
+        if item["discard_count"] != idx:
+            raise ValueError("discard_count must be sequential starting at 1")
+        if item["after_races"] <= prev_after:
+            raise ValueError("after_races must increase for each discard rule")
+        prev_after = item["after_races"]
+
+    return {"discard_rules": normalized}

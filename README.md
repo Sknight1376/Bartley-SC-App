@@ -251,10 +251,10 @@ Options:
 
 
 
-Extract remaining mobile routes into mobile_api.py + mobile_repository.py
-Extract members/boats routes (can go in a new members_api.py + members_repository.py)
-Extract the series CRUD routes into series_management.py + extend series_repository.py
-Broaden schema_validation.py to cover members, series, and mobile payloads
+✅ Extract remaining mobile routes into mobile_api.py + mobile_repository.py
+✅ Extract members/boats routes (new members_api.py + members_repository.py)
+✅ Extract the series CRUD routes into series_management.py + extend series_repository.py
+✅ Broaden schema_validation.py to cover members, series, and mobile payloads
 
 
 
