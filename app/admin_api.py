@@ -1,4 +1,13 @@
-from services.admin_repository import check_db_health, get_race_audit_rows, get_race_revision_rows
+from services.admin_repository import (
+    authenticate_club_user,
+    check_db_health,
+    get_club_id_by_name,
+    get_race_audit_rows,
+    get_race_revision_rows,
+    get_series_id_by_name,
+    get_test_race_seed_entries,
+    update_club_user_last_login,
+)
 from services.race_control_repository import get_race_for_club
 
 
@@ -9,6 +18,72 @@ def health_check(db):
         return {"ok": True, "status": "healthy"}, 200
     except Exception as exc:
         return {"ok": False, "status": "unhealthy", "error": str(exc)}, 500
+
+
+def admin_login(db, payload, grant_club_role):
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+
+    if not username or not password:
+        return {"ok": False, "error": "Missing username or password"}, 400
+
+    try:
+        with db.engine.begin() as conn:
+            user_row = authenticate_club_user(conn, username, password)
+            if user_row:
+                update_club_user_last_login(conn, user_row["user_id"])
+                grant_club_role(conn, user_row["user_id"], user_row["club_id"], "club_admin", user_row["user_id"])
+
+        if not user_row:
+            return {"ok": False, "error": "Invalid username or password"}, 401
+
+        return {
+            "ok": True,
+            "user_id": user_row["user_id"],
+            "club_id": str(user_row["club_id"]),
+            "club_name": user_row["club_name"],
+            "username": user_row["username"],
+        }, 200
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}, 500
+
+
+def load_test_race_session_seed(db):
+    try:
+        with db.engine.connect() as conn:
+            club_id = get_club_id_by_name(conn, "Test Club")
+            series_id = get_series_id_by_name(conn, "Test Series")
+            rows = get_test_race_seed_entries(conn, club_id)
+
+        entries = [
+            {
+                "key": str(row["boatkey"]),
+                "boat": row["boat"],
+                "sailor": row["sailor"],
+                "handicap": row["handicap"],
+                "sailNumber": row["sail_number"],
+            }
+            for row in rows
+        ]
+
+        if not entries:
+            entries = [
+                {"key": "1", "boat": "Laser 1", "sailor": "John Doe", "handicap": 1100, "sailNumber": "123"},
+                {"key": "2", "boat": "Laser 2", "sailor": "Jane Smith", "handicap": 1120, "sailNumber": "456"},
+                {"key": "3", "boat": "Laser 3", "sailor": "Bob Johnson", "handicap": 1080, "sailNumber": "789"},
+            ]
+
+        return {
+            "ok": True,
+            "race": {
+                "club_id": str(club_id) if club_id is not None else "Test Club",
+                "series_id": str(series_id) if series_id is not None else "Test Series",
+                "entries": entries,
+                "status": "not_started",
+            },
+        }, 200
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}, 500
 
 
 def get_race_audit(db, race_id, club_id):

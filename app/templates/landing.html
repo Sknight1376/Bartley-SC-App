@@ -22,6 +22,7 @@
 <div class="form-footer" style="display:flex; gap:20px; justify-content:center;">
   <button id="newRaceBtn" class="blue-button" style="left: 0; right: auto;">Start New Race</button>
   <button id="membersBtn" class="blue-button" style="left: 33%; right: auto;">Manage Members</button>
+  <button id="dashboardBtn" class="blue-button" style="left: 50%; right: auto;">Club Dashboard</button>
   <button id="seriesBtn" class="blue-button" style="left: 66%; right: auto;">Manage Series</button>
   <button id="sailorPortalBtn" class="blue-button" style="left: 66%; right: auto;">Sailor Portal</button>
   <!-- <button id="testRaceBtn" class="blue-button" style="left: 25%; transform: translateX(-50%);">Open Test Race</button> -->
@@ -35,6 +36,10 @@ document.getElementById('newRaceBtn').addEventListener('click', () => {
 
 document.getElementById('membersBtn').addEventListener('click', () => {
   window.location.href = '/members';
+});
+
+document.getElementById('dashboardBtn').addEventListener('click', () => {
+  window.location.href = '/club_dashboard';
 });
 
 document.getElementById('seriesBtn').addEventListener('click', () => {

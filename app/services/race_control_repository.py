@@ -236,3 +236,99 @@ def delete_lap(conn, lap_id):
         text('DELETE FROM "RACINGAPP"."LAP" WHERE key = :lap_id'),
         {"lap_id": lap_id}
     )
+
+
+def get_selected_race_for_start(conn, race_id, club_id, series_id):
+    return conn.execute(
+        text('''
+            SELECT key, race_no, status, results_status, results_locked_at
+            FROM "RACINGAPP"."RACE"
+            WHERE key = :race_id
+              AND club = :club_id
+              AND series = :series_id
+            LIMIT 1
+        '''),
+        {"race_id": race_id, "club_id": club_id, "series_id": series_id}
+    ).mappings().first()
+
+
+def clear_race_entries_for_race(conn, race_id):
+    conn.execute(
+        text('DELETE FROM "RACINGAPP"."RACE_ENTRY" WHERE race_id = :race_id'),
+        {"race_id": race_id}
+    )
+
+
+def get_next_race_no_for_series(conn, series_id):
+    return conn.execute(
+        text('SELECT COALESCE(MAX(race_no), 0) + 1 FROM "RACINGAPP"."RACE" WHERE series = :series'),
+        {"series": series_id}
+    ).scalar()
+
+
+def insert_race_start_row(conn, club_id, series_id, race_no, source_mode):
+    return conn.execute(
+        text('''
+            INSERT INTO "RACINGAPP"."RACE" (club, series, race_no, status, started_at, source_mode, results_status)
+            VALUES (:club, :series, :race_no, :status, CURRENT_TIMESTAMP, :source_mode, 'draft')
+            RETURNING key
+        '''),
+        {
+            "club": club_id,
+            "series": series_id,
+            "race_no": race_no,
+            "status": "active",
+            "source_mode": source_mode,
+        }
+    ).scalar()
+
+
+def resolve_boatkey_for_start(conn, sailor, sail_number, club_id=None):
+    return conn.execute(
+        text('''
+            SELECT bc.key
+            FROM "RACINGAPP"."BOATCONTROL" bc
+            JOIN "RACINGAPP"."SAILORCONTROL" sc ON sc.key = bc.sailor
+            WHERE sc.fullname = :sailor
+              AND bc.sail_number = :sail_number
+              AND (:club_id IS NULL OR sc.club = :club_id)
+            ORDER BY bc.key DESC
+            LIMIT 1
+        '''),
+        {"sailor": sailor, "sail_number": sail_number, "club_id": club_id}
+    ).scalar()
+
+
+def get_race_summary_header(conn, race_id, club_id):
+    return conn.execute(
+        text('''
+            SELECT r.race_no, r.started_at, r.ended_at, r.status,
+                   cc.name AS club_name, sc.name AS series_name
+            FROM "RACINGAPP"."RACE" r
+            JOIN "RACINGAPP"."CLUBCONTROL" cc ON r.club = cc.key
+            JOIN "RACINGAPP"."SERIESCONTROL" sc ON r.series = sc.key
+            WHERE r.key = :race_id
+              AND r.club = :club_id
+        '''),
+        {"race_id": race_id, "club_id": club_id}
+    ).mappings().first()
+
+
+def get_race_summary_results(conn, race_id):
+    return conn.execute(
+        text('''
+            SELECT re.key AS entry_id,
+                   re.sailor, re.boat, re.sail_number, re.handicap,
+                   COUNT(l.key) AS lap_count,
+                   MAX(CASE WHEN l.is_finish THEN l.elapsed_sec   END) AS final_elapsed_sec,
+                   MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS final_corrected_sec,
+                   MAX(CASE WHEN l.is_finish THEN l.position      END) AS final_position
+            FROM "RACINGAPP"."RACE_ENTRY" re
+            LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
+            WHERE re.race_id = :race_id
+            GROUP BY re.key, re.sailor, re.boat, re.sail_number, re.handicap
+            ORDER BY MAX(CASE WHEN l.is_finish THEN l.position      END) ASC NULLS LAST,
+                     MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) ASC NULLS LAST
+        '''),
+        {"race_id": race_id}
+    ).mappings().all()

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Club Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+  <style>
+    .dashboard-wrap { width: 1100px; margin: 20px auto 60px; text-align: left; }
+    .dashboard-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+    .dash-nav-btn { border: 1px solid #d4d8ff; background: #fff; color: #1331C5; padding: 10px 12px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    .dash-nav-btn.active { background: #1331C5; color: #fff; }
+    .dash-card { background: #fff; border: 1px solid #dfe3fb; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.06); margin-top: 16px; }
+    .dash-card h3 { margin: 0; padding: 14px 16px; color: #1331C5; border-bottom: 1px solid #eceffd; }
+    .dash-body { padding: 14px 16px; }
+    .dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .dash-table th { text-align: left; background: #f2f4ff; color: #223; padding: 8px; border-bottom: 1px solid #dfe3fb; }
+    .dash-table td { padding: 8px; border-bottom: 1px solid #eef1ff; }
+    .dash-chip { display:inline-block; padding: 2px 8px; border-radius: 12px; background:#eef2ff; color:#233b9b; font-size:12px; }
+    .dash-controls { display:flex; gap:10px; align-items:center; margin-bottom:10px; flex-wrap: wrap; }
+    .dash-controls input, .dash-controls select { height:34px; border:1px solid #cfd6ff; border-radius:6px; padding:0 8px; }
+    .hidden { display: none; }
+    .muted { color:#6b7280; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</head>
+<body>
+  <div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
+  <section class="banner"></section>
+
+  <div class="dashboard-wrap">
+    <div class="form-border" style="width:1100px; text-align:center;">
+      <h4 style="color:#979797">Club Administration</h4>
+      <h2>Club Dashboard</h2>
+      <h4 style="color:#979797">{{ clubName }}</h4>
+    </div>
+
+    <div class="dashboard-nav">
+      <button class="dash-nav-btn active" data-view="sailors">Sailors & Boats</button>
+      <button class="dash-nav-btn" data-view="calendar">Race Calendar</button>
+      <button class="dash-nav-btn" data-view="duties">Race-Duty Roster</button>
+      <button class="dash-nav-btn" data-view="review">Results Review Queue</button>
+      <button class="dash-nav-btn" data-view="handicap">Handicap Recommendations</button>
+      <button class="dash-nav-btn" data-view="exports">Exports</button>
+      <button class="dash-nav-btn" data-view="imports">Imports (Paper / CSV)</button>
+    </div>
+
+    <section id="view-sailors" class="dash-card">
+      <h3>Sailors and Boats</h3>
+      <div class="dash-body dash-grid">
+        <div>
+          <h4>Sailors</h4>
+          <table class="dash-table"><thead><tr><th>Name</th><th>Boat Count</th></tr></thead><tbody id="sailorsRows"></tbody></table>
+        </div>
+        <div>
+          <h4>Boat Class Usage</h4>
+          <table class="dash-table"><thead><tr><th>Class</th><th>Handicap</th><th>Assigned</th></tr></thead><tbody id="boatClassRows"></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-calendar" class="dash-card hidden">
+      <h3>Race Calendar</h3>
+      <div class="dash-body">
+        <div class="dash-controls">
+          <label>From <input type="date" id="calendarFrom"></label>
+          <label>To <input type="date" id="calendarTo"></label>
+          <button class="dash-nav-btn" id="reloadCalendar">Reload</button>
+        </div>
+        <table class="dash-table"><thead><tr><th>Series</th><th>Race</th><th>Start</th><th>Status</th><th>Results</th><th>Source</th></tr></thead><tbody id="calendarRows"></tbody></table>
+      </div>
+    </section>
+
+    <section id="view-duties" class="dash-card hidden">
+      <h3>Race-Duty Roster</h3>
+      <div class="dash-body">
+        <table class="dash-table"><thead><tr><th>Race</th><th>Series</th><th>Sailor</th><th>Duty</th><th>Status</th><th>Notes</th></tr></thead><tbody id="dutyRows"></tbody></table>
+      </div>
+    </section>
+
+    <section id="view-review" class="dash-card hidden">
+      <h3>Results Review Queue</h3>
+      <div class="dash-body">
+        <table class="dash-table"><thead><tr><th>Race</th><th>Series</th><th>Status</th><th>Results</th><th>Entries</th><th>Finishes</th><th>Action</th></tr></thead><tbody id="reviewRows"></tbody></table>
+      </div>
+    </section>
+
+    <section id="view-handicap" class="dash-card hidden">
+      <h3>Handicap Recommendations</h3>
+      <div class="dash-body">
+        <table class="dash-table"><thead><tr><th>When</th><th>Race</th><th>Series</th><th>Recommendation</th><th>Decision</th><th>Reason</th></tr></thead><tbody id="handicapRows"></tbody></table>
+      </div>
+    </section>
+
+    <section id="view-exports" class="dash-card hidden">
+      <h3>Exports</h3>
+      <div class="dash-body">
+        <div class="dash-controls">
+          <label>Race ID <input type="number" id="exportRaceId" min="1" placeholder="e.g. 101"></label>
+          <button class="dash-nav-btn" id="exportResultsBtn">Download Results CSV</button>
+        </div>
+        <div id="exportStatus" class="muted"></div>
+      </div>
+    </section>
+
+    <section id="view-imports" class="dash-card hidden">
+      <h3>Imports from Paper / CSV</h3>
+      <div class="dash-body">
+        <div class="dash-controls">
+          <input type="file" id="importFile" accept=".csv,text/csv">
+          <button class="dash-nav-btn" id="previewImportBtn">Preview CSV</button>
+          <label>Apply to Race ID <input type="number" id="importRaceId" min="1" placeholder="e.g. 101"></label>
+          <button class="dash-nav-btn" id="applyImportBtn">Apply to Race</button>
+        </div>
+        <div id="importStatus" class="muted"></div>
+        <table class="dash-table" style="margin-top:10px;"><thead><tr><th>Sailor</th><th>Boat</th><th>Sail #</th><th>Elapsed</th><th>Corrected</th><th>Pos</th><th>DNF</th></tr></thead><tbody id="importRows"></tbody></table>
+      </div>
+    </section>
+
+    <div class="form-footer" style="width:1100px; display:flex; justify-content:center; gap:20px;">
+      <button class="blue-button" style="position:static;" onclick="window.location.href='/landing'">Back to Landing</button>
+      <button class="blue-button" style="position:static;" onclick="window.location.href='/members'">Manage Members</button>
+      <button class="blue-button" style="position:static;" onclick="window.location.href='/series'">Manage Series</button>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/club_dashboard.js') }}"></script>
+</body>
+</html>

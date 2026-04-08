@@ -1,3 +1,5 @@
+from datetime import date, datetime, timedelta
+
 from sqlalchemy import text
 
 
@@ -339,3 +341,290 @@ def list_series_races(conn, series_id):
         '''),
         {"series_id": series_id}
     ).mappings().all()
+
+
+def ensure_series_schedule_tables(conn):
+    conn.execute(text('''
+        CREATE TABLE IF NOT EXISTS "RACINGAPP"."SERIES_RULE" (
+            key BIGINT PRIMARY KEY DEFAULT nextval('key'),
+            series BIGINT NOT NULL REFERENCES "RACINGAPP"."SERIESCONTROL"(key) ON DELETE CASCADE,
+            weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+            start_time TIME NOT NULL,
+            cadence_weeks INTEGER NOT NULL DEFAULT 1 CHECK (cadence_weeks > 0),
+            races_per_day INTEGER NOT NULL DEFAULT 1 CHECK (races_per_day > 0),
+            target_race_count INTEGER NULL,
+            extra_start_times TEXT NULL,
+            slot_gap_minutes INTEGER NOT NULL DEFAULT 10 CHECK (slot_gap_minutes > 0),
+            valid_from DATE NOT NULL,
+            valid_to DATE NULL,
+            anchor_date DATE NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+
+    conn.execute(text('''
+        CREATE TABLE IF NOT EXISTS "RACINGAPP"."SERIES_EXCEPTION" (
+            key BIGINT PRIMARY KEY DEFAULT nextval('key'),
+            series BIGINT NOT NULL REFERENCES "RACINGAPP"."SERIESCONTROL"(key) ON DELETE CASCADE,
+            exception_type VARCHAR(16) NOT NULL CHECK (exception_type IN ('cancel', 'move', 'add')),
+            exception_date DATE NULL,
+            original_start_at TIMESTAMP NULL,
+            override_start_at TIMESTAMP NULL,
+            note TEXT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+
+    conn.execute(text('''
+        CREATE TABLE IF NOT EXISTS "RACINGAPP"."SERIES_SCORING" (
+            series BIGINT PRIMARY KEY REFERENCES "RACINGAPP"."SERIESCONTROL"(key) ON DELETE CASCADE,
+            scoring_system VARCHAR(32) NOT NULL DEFAULT 'low_point',
+            races_to_count INTEGER NULL,
+            discard_after_races INTEGER NULL,
+            discards_allowed INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    '''))
+
+    conn.execute(text('''
+        CREATE TABLE IF NOT EXISTS "RACINGAPP"."SERIES_SCORING_DISCARD" (
+            key BIGINT PRIMARY KEY DEFAULT nextval('key'),
+            series BIGINT NOT NULL REFERENCES "RACINGAPP"."SERIESCONTROL"(key) ON DELETE CASCADE,
+            discard_count INTEGER NOT NULL CHECK (discard_count > 0),
+            after_races INTEGER NOT NULL CHECK (after_races > 0),
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(series, discard_count)
+        )
+    '''))
+
+    conn.execute(text('''
+        ALTER TABLE "RACINGAPP"."SERIES_RULE"
+        ADD COLUMN IF NOT EXISTS extra_start_times TEXT NULL
+    '''))
+    conn.execute(text('''
+        ALTER TABLE "RACINGAPP"."SERIES_RULE"
+        ADD COLUMN IF NOT EXISTS target_race_count INTEGER NULL
+    '''))
+    conn.execute(text('''
+        ALTER TABLE "RACINGAPP"."SERIES_EXCEPTION"
+        ADD COLUMN IF NOT EXISTS exception_date DATE NULL
+    '''))
+
+    conn.execute(text('''
+        CREATE INDEX IF NOT EXISTS idx_series_rule_series
+            ON "RACINGAPP"."SERIES_RULE" (series)
+    '''))
+    conn.execute(text('''
+        CREATE INDEX IF NOT EXISTS idx_series_exception_series
+            ON "RACINGAPP"."SERIES_EXCEPTION" (series)
+    '''))
+    conn.execute(text('''
+        CREATE INDEX IF NOT EXISTS idx_series_scoring_discard_series
+            ON "RACINGAPP"."SERIES_SCORING_DISCARD" (series)
+    '''))
+    conn.execute(text('''
+        CREATE INDEX IF NOT EXISTS idx_race_series_started
+            ON "RACINGAPP"."RACE" (series, started_at)
+    '''))
+
+
+def check_series_access(conn, series_id, club_id):
+    return conn.execute(
+        text('''
+            SELECT 1
+            FROM "RACINGAPP"."SERIESCONTROL"
+            WHERE key = :series_id
+              AND club = :club_id
+            LIMIT 1
+        '''),
+        {"series_id": series_id, "club_id": club_id}
+    ).scalar()
+
+
+def recompute_series_rule_end_dates(conn, series_id):
+    rules = conn.execute(
+        text('''
+            SELECT key, weekday, cadence_weeks, races_per_day, target_race_count, valid_from
+            FROM "RACINGAPP"."SERIES_RULE"
+            WHERE series = :series_id
+              AND is_active = TRUE
+              AND target_race_count IS NOT NULL
+              AND target_race_count > 0
+        '''),
+        {"series_id": series_id}
+    ).mappings().all()
+
+    exception_rows = conn.execute(
+        text('''
+            SELECT COALESCE(exception_date, DATE(original_start_at)) AS exception_date
+            FROM "RACINGAPP"."SERIES_EXCEPTION"
+            WHERE series = :series_id
+              AND is_active = TRUE
+              AND exception_type = 'cancel'
+        '''),
+        {"series_id": series_id}
+    ).mappings().all()
+
+    excluded_dates = [r["exception_date"] for r in exception_rows if r.get("exception_date")]
+
+    def _calculate_rule_end_date_with_exceptions(valid_from, weekday, cadence_weeks, races_per_day, target_race_count, excluded):
+        if target_race_count is None or target_race_count <= 0:
+            return None
+
+        excluded_set = set(excluded or [])
+        days_to_add = (weekday - valid_from.weekday()) % 7
+        current = valid_from + timedelta(days=days_to_add)
+        remaining = int(target_race_count)
+
+        while True:
+            if current not in excluded_set:
+                remaining -= min(races_per_day, remaining)
+                if remaining <= 0:
+                    return current
+            current = current + timedelta(days=7 * cadence_weeks)
+
+    for rule in rules:
+        new_valid_to = _calculate_rule_end_date_with_exceptions(
+            valid_from=rule["valid_from"],
+            weekday=int(rule["weekday"]),
+            cadence_weeks=int(rule["cadence_weeks"]),
+            races_per_day=int(rule["races_per_day"]),
+            target_race_count=int(rule["target_race_count"]),
+            excluded=excluded_dates,
+        )
+        if new_valid_to:
+            conn.execute(
+                text('''
+                    UPDATE "RACINGAPP"."SERIES_RULE"
+                    SET valid_to = :valid_to,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE key = :rule_id
+                '''),
+                {"valid_to": new_valid_to, "rule_id": rule["key"]}
+            )
+
+
+def generate_series_races(conn, series_id, club_id, from_date, to_date):
+    ensure_series_schedule_tables(conn)
+
+    rules = conn.execute(
+        text('''
+             SELECT key, weekday, start_time, cadence_weeks, races_per_day,
+                 extra_start_times, slot_gap_minutes, valid_from, valid_to
+            FROM "RACINGAPP"."SERIES_RULE"
+            WHERE series = :series_id
+              AND is_active = TRUE
+              AND valid_from <= :to_date
+              AND (valid_to IS NULL OR valid_to >= :from_date)
+            ORDER BY key ASC
+        '''),
+        {"series_id": series_id, "from_date": from_date, "to_date": to_date}
+    ).mappings().all()
+
+    exceptions = conn.execute(
+        text('''
+            SELECT exception_type, exception_date, original_start_at
+            FROM "RACINGAPP"."SERIES_EXCEPTION"
+            WHERE series = :series_id
+              AND is_active = TRUE
+            ORDER BY key ASC
+        '''),
+        {"series_id": series_id}
+    ).mappings().all()
+
+    planned = {}
+
+    for rule in rules:
+        weekday = int(rule["weekday"])
+        cadence = int(rule["cadence_weeks"])
+        races_per_day = int(rule["races_per_day"])
+        start_time = rule["start_time"]
+        cadence_anchor = rule["valid_from"]
+        rule_start = max(rule["valid_from"], from_date)
+        rule_end = min(rule["valid_to"] or to_date, to_date)
+        extra_start_times = [s.strip() for s in (rule.get("extra_start_times") or "").split(",") if s and s.strip()]
+        slot_gap = int(rule["slot_gap_minutes"])
+
+        day_start_times = [start_time]
+        if races_per_day > 1:
+            if len(extra_start_times) >= races_per_day - 1:
+                day_start_times.extend([
+                    datetime.strptime(t, "%H:%M").time()
+                    for t in extra_start_times[:races_per_day - 1]
+                ])
+            else:
+                day_start_times.extend([
+                    (datetime.combine(date.today(), start_time) + timedelta(minutes=slot_gap * slot)).time()
+                    for slot in range(1, races_per_day)
+                ])
+
+        if rule_start > rule_end:
+            continue
+
+        first = rule_start + timedelta(days=(weekday - rule_start.weekday()) % 7)
+        while ((first - cadence_anchor).days // 7) % cadence != 0:
+            first = first + timedelta(days=7)
+
+        current = first
+        while current <= rule_end:
+            for slot in range(races_per_day):
+                started_at = datetime.combine(current, day_start_times[slot])
+                planned[started_at] = True
+            current = current + timedelta(days=7 * cadence)
+
+    excluded_dates = set()
+    for ex in exceptions:
+        ex_date = ex["exception_date"]
+        if not ex_date and ex.get("exception_type") == "cancel" and ex.get("original_start_at"):
+            ex_date = ex["original_start_at"].date()
+        if ex_date and from_date <= ex_date <= to_date:
+            excluded_dates.add(ex_date)
+
+    if excluded_dates:
+        for dt_key in list(planned.keys()):
+            if dt_key.date() in excluded_dates:
+                planned.pop(dt_key, None)
+
+    max_race_no = conn.execute(
+        text('SELECT COALESCE(MAX(race_no), 0) FROM "RACINGAPP"."RACE" WHERE series = :series_id'),
+        {"series_id": series_id}
+    ).scalar() or 0
+
+    inserted = 0
+    skipped = 0
+    for started_at in sorted(planned.keys()):
+        exists = conn.execute(
+            text('''
+                SELECT 1
+                FROM "RACINGAPP"."RACE"
+                WHERE series = :series_id
+                  AND started_at = :started_at
+                LIMIT 1
+            '''),
+            {"series_id": series_id, "started_at": started_at}
+        ).scalar()
+        if exists:
+            skipped += 1
+            continue
+
+        max_race_no += 1
+        conn.execute(
+            text('''
+                INSERT INTO "RACINGAPP"."RACE" (key, club, series, race_no, status, started_at, ended_at)
+                VALUES (nextval('key'), :club, :series, :race_no, 'not_started', :started_at, NULL)
+            '''),
+            {"club": club_id, "series": series_id, "race_no": max_race_no, "started_at": started_at}
+        )
+        inserted += 1
+
+    return {
+        "rule_count": len(rules),
+        "planned_count": len(planned),
+        "inserted_count": inserted,
+        "skipped_count": skipped,
+    }

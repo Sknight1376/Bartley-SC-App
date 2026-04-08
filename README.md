@@ -236,7 +236,7 @@ Options:
 
 **Product Recommendations**
 <!-- - **P0 – operational correctness:** add role-based access (`club_admin`, `race_officer`, `sailor`), duty-date/duty-race assignments, retrospective result entry/edit screens, result locking/unlocking, and audit history for every race change. -->
-- **P0 – architecture:** split app.py into modules like `mobile_api`, `admin_api`, `race_control`, `series_management`, and `services`; move raw SQL into service/repository layers and add schema validation.
+<!-- - **P0 – architecture:** split app.py into modules like `mobile_api`, `admin_api`, `race_control`, `series_management`, and `services`; move raw SQL into service/repository layers and add schema validation. -->
 - **P1 – admin hub:** add club dashboard views for sailors, boats, race calendar, race-duty roster, results review queue, handicap recommendations, and exports/imports from paper/CSV.
 - **P1 – mobile entitlement:** make race control invisible unless the backend says the sailor is currently granted duty access for that club/date/race.
 - **P1 – analytics foundation:** create tables for `personal_handicap_snapshot`, `performance_event`, `club_adjustment_recommendation`, and `cross_club_benchmark`; start with trends like finish consistency, corrected-time delta to fleet median, class-normalized improvement, and series momentum.

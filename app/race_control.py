@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from services.race_control_repository import (
+    clear_race_entries_for_race,
     delete_entry,
     delete_entry_laps,
     delete_lap,
@@ -9,11 +10,17 @@ from services.race_control_repository import (
     get_lap_count_for_entry,
     get_lap_for_race,
     get_race_for_club,
+    get_race_summary_header,
+    get_race_summary_results,
+    get_selected_race_for_start,
+    get_next_race_no_for_series,
     insert_lap,
+    insert_race_start_row,
     insert_race_entry,
     lock_race_results,
     race_entry_exists,
     resolve_boatkey,
+    resolve_boatkey_for_start,
     set_race_active,
     unlock_race_results,
     update_lap,
@@ -25,6 +32,208 @@ def ensure_results_editable(race_row, race_is_locked):
     if race_is_locked(race_row):
         return False, "Results are locked for this race"
     return True, None
+
+
+def web_start_race(
+    db,
+    payload,
+    race_data,
+    session_club_id,
+    actor,
+    race_is_locked,
+    create_race_revision,
+    write_race_audit,
+):
+    club_id = payload.get("club_id") or race_data.get("club_id") or session_club_id
+    series_id = payload.get("series_id") or race_data.get("series_id")
+    selected_race_id = payload.get("race_id") or race_data.get("race_id")
+    entries = payload.get("entries") or race_data.get("entries") or []
+    source_mode = (payload.get("source_mode") or "live").strip().lower()
+    if source_mode not in ("live", "retrospective"):
+        source_mode = "live"
+    reason = (payload.get("reason") or "Web race start").strip() or "Web race start"
+
+    if not club_id or not series_id:
+        return {"ok": False, "error": "Missing club_id or series_id"}, 400
+    if str(club_id) != str(session_club_id):
+        return {"ok": False, "error": "Forbidden"}, 403
+    if not entries:
+        return {"ok": False, "error": "No entries provided"}, 400
+
+    if race_data.get("race_id") and race_data.get("status") == "active":
+        return {
+            "ok": True,
+            "race_id": race_data.get("race_id"),
+            "race_no": race_data.get("race_no"),
+            "entries": race_data.get("entries", []),
+        }, 200
+
+    race_id = None
+    race_no = None
+    persisted_entries = []
+
+    try:
+        with db.engine.begin() as conn:
+            if selected_race_id:
+                selected = get_selected_race_for_start(conn, selected_race_id, club_id, series_id)
+                if not selected:
+                    return {"ok": False, "error": "Selected race not found for this club/series"}, 404
+                if race_is_locked(selected):
+                    return {"ok": False, "error": "Results are locked for this race"}, 409
+                if selected["status"] == "finished":
+                    return {"ok": False, "error": "Selected race is already finished"}, 409
+
+                race_id = selected["key"]
+                race_no = selected["race_no"]
+
+                set_race_active(conn, race_id, source_mode)
+                clear_race_entries_for_race(conn, race_id)
+            else:
+                race_no = get_next_race_no_for_series(conn, series_id)
+                race_id = insert_race_start_row(conn, club_id, series_id, race_no, source_mode)
+
+            revision_id = create_race_revision(
+                conn,
+                race_id,
+                actor,
+                reason=reason,
+                status="draft",
+                source_mode=source_mode,
+            )
+
+            for entry in entries:
+                raw_boatkey = entry.get("key")
+                boatkey = None
+                if raw_boatkey not in (None, ""):
+                    try:
+                        boatkey = int(raw_boatkey)
+                    except (TypeError, ValueError):
+                        boatkey = None
+
+                if boatkey is None:
+                    club_id_int = None
+                    try:
+                        club_id_int = int(club_id)
+                    except (TypeError, ValueError):
+                        club_id_int = None
+
+                    boatkey = resolve_boatkey_for_start(
+                        conn,
+                        entry.get("sailor"),
+                        entry.get("sailNumber"),
+                        club_id_int,
+                    )
+
+                if boatkey is None:
+                    return {
+                        "ok": False,
+                        "error": f"Missing/invalid boat key for entry: {entry.get('sailor', 'unknown')} ({entry.get('sailNumber', 'no sail #')}). Re-add this sailor/boat from the entry screen.",
+                        "race_id": race_id,
+                        "race_no": race_no,
+                        "entries": persisted_entries,
+                    }, 400
+
+                handicap_raw = entry.get("handicap")
+                handicap = None
+                if handicap_raw not in (None, "", "N/A"):
+                    try:
+                        handicap = int(float(handicap_raw))
+                    except (TypeError, ValueError):
+                        handicap = None
+
+                entry_id = insert_race_entry(
+                    conn,
+                    {
+                        "race_id": race_id,
+                        "boatkey": boatkey,
+                        "sailor": entry.get("sailor"),
+                        "boat": entry.get("boat"),
+                        "sail_number": entry.get("sailNumber"),
+                        "handicap": handicap,
+                        "created_by_user": actor.get("created_by_user"),
+                        "created_by_type": actor.get("created_by_type"),
+                        "source": source_mode,
+                        "revision_id": revision_id,
+                    },
+                )
+
+                persisted_entry = dict(entry)
+                persisted_entry["entry_id"] = entry_id
+                persisted_entries.append(persisted_entry)
+
+            write_race_audit(
+                conn,
+                race_id,
+                actor,
+                entity_type="race",
+                entity_id=race_id,
+                action="race_started",
+                reason=reason,
+                after_obj={
+                    "race_no": race_no,
+                    "entry_count": len(persisted_entries),
+                    "source_mode": source_mode,
+                },
+                revision_id=revision_id,
+            )
+
+        return {"ok": True, "race_id": race_id, "race_no": race_no, "entries": persisted_entries}, 200
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "race_id": race_id,
+            "race_no": race_no,
+            "entries": persisted_entries,
+        }, 500
+
+
+def web_race_summary(db, race_id, club_id):
+    try:
+        with db.engine.connect() as conn:
+            race_row = get_race_summary_header(conn, race_id, club_id)
+            if not race_row:
+                return {"ok": False, "error": "Race not found"}, 404
+            results_rows = get_race_summary_results(conn, race_id)
+
+        def secs_to_hms(s):
+            if s is None:
+                return None
+            s = int(s)
+            return f"{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}"
+
+        started_at = race_row["started_at"]
+        ended_at = race_row["ended_at"]
+        duration_sec = int((ended_at - started_at).total_seconds()) if started_at and ended_at else None
+
+        race_info = {
+            "race_no": race_row["race_no"],
+            "club_name": race_row["club_name"],
+            "series_name": race_row["series_name"],
+            "started_at": started_at.strftime("%H:%M:%S") if started_at else None,
+            "date": started_at.strftime("%d %B %Y") if started_at else None,
+            "duration": secs_to_hms(duration_sec),
+        }
+
+        results = [
+            {
+                "entry_id": row["entry_id"],
+                "sailor": row["sailor"],
+                "boat": row["boat"],
+                "sail_number": row["sail_number"],
+                "handicap": row["handicap"],
+                "lap_count": int(row["lap_count"]) if row["lap_count"] else 0,
+                "elapsed_time": secs_to_hms(row["final_elapsed_sec"]),
+                "corrected_time": secs_to_hms(row["final_corrected_sec"]),
+                "position": row["final_position"],
+                "dnf": row["final_position"] is None,
+            }
+            for row in results_rows
+        ]
+
+        return {"ok": True, "race": race_info, "results": results}, 200
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}, 500
 
 
 def mobile_control_start(
