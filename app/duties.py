@@ -6,6 +6,7 @@ from services.duty_repository import (
     get_sailor_user_id,
 )
 from services.race_control_repository import get_race_for_club
+from services.error_responses import error_payload_for_exception
 
 
 def list_race_duties(db, race_id, club_id):
@@ -17,7 +18,7 @@ def list_race_duties(db, race_id, club_id):
             rows = get_race_duties(conn, race_id)
         return {"ok": True, "race_id": race_id, "duties": [dict(r) for r in rows]}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def assign_race_duty(
@@ -103,7 +104,7 @@ def assign_race_duty(
             "granted_by": actor.get("actor_user_id"),
         }, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def assign_race_duty_by_date(
@@ -218,7 +219,7 @@ def assign_race_duty_by_date(
             "duty_ids": duty_ids,
         }, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def delete_race_duty(db, race_id, duty_id, club_id, actor, write_race_audit):
@@ -241,4 +242,4 @@ def delete_race_duty(db, race_id, duty_id, club_id, actor, write_race_audit):
 
         return {"ok": True, "race_id": race_id, "duty_id": duty_id}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)

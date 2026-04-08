@@ -1,6 +1,7 @@
 from flask import Flask, Response, render_template, jsonify, request, session, redirect
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, OperationalError
 from datetime import datetime, timedelta, time, date
 import json
 import os
@@ -136,6 +137,7 @@ from club_dashboard_api import (
     dashboard_results_review_queue,
     dashboard_sailors_boats,
 )
+from services.error_responses import error_payload_for_exception, is_db_disconnect_error
 
 
 
@@ -150,6 +152,38 @@ db = SQLAlchemy(app)
 app.secret_key = os.environ.get('SECRET_KEY', 'change-me-in-production')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 db.Model.metadata.reflect(db.engine, schema='RACINGAPP')
+
+
+@app.errorhandler(OperationalError)
+@app.errorhandler(DBAPIError)
+def handle_database_errors(exc):
+    payload, status = error_payload_for_exception(exc)
+    if request.path.startswith("/api/"):
+        return jsonify(payload), status
+    return Response("Database unavailable. Please try again shortly.", status=status)
+
+
+@app.after_request
+def normalize_api_db_disconnect_response(response):
+    if not request.path.startswith("/api/"):
+        return response
+    if response.status_code != 500:
+        return response
+    if "application/json" not in (response.mimetype or ""):
+        return response
+
+    data = response.get_json(silent=True)
+    if not isinstance(data, dict):
+        return response
+
+    error_msg = data.get("error")
+    if not error_msg or not is_db_disconnect_error(error_msg):
+        return response
+
+    payload, status = error_payload_for_exception(error_msg)
+    normalized = jsonify(payload)
+    normalized.status_code = status
+    return normalized
 
 class Boats(db.Model):
     __table__ = db.metadata.tables["RACINGAPP.HANDICAPCONTROL"]
@@ -254,7 +288,8 @@ def require_mobile_race_control_access(race_id):
 
             allowed = sailor_can_access_race_control(conn, sailor_user_id, sailor_id, club_id, race_id)
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 500
+        payload, status = error_payload_for_exception(exc)
+        return jsonify(payload), status
 
     if not allowed:
         logging.warning(
@@ -280,7 +315,8 @@ def require_club_admin(redirect_to_login=False):
         with db.engine.connect() as conn:
             allowed = club_user_has_role(conn, club_user_id, club_id, "club_admin")
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 500
+        payload, status = error_payload_for_exception(exc)
+        return jsonify(payload), status
 
     if not allowed:
         if redirect_to_login:
@@ -304,7 +340,8 @@ def require_club_admin_or_race_officer(redirect_to_login=False):
             is_admin = club_user_has_role(conn, club_user_id, club_id, "club_admin")
             is_race_officer = club_user_has_role(conn, club_user_id, club_id, "race_officer")
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 500
+        payload, status = error_payload_for_exception(exc)
+        return jsonify(payload), status
 
     if not (is_admin or is_race_officer):
         if redirect_to_login:
@@ -1528,7 +1565,8 @@ def api_get_upcoming_races_for_club(club_id):
             rows = get_upcoming_races_for_club(conn, club_id)
         return jsonify({"ok": True, "races": [dict(r) for r in rows]})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        payload, status = error_payload_for_exception(e)
+        return jsonify(payload), status
 
 
 @app.get("/api/races/<int:race_id>/entries")
@@ -1548,7 +1586,8 @@ def api_get_race_entries(race_id):
             rows = get_race_entries_for_race(conn, race_id)
         return jsonify({"ok": True, "entries": [dict(r) for r in rows]})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        payload, status = error_payload_for_exception(e)
+        return jsonify(payload), status
 
 @app.get("/api/name/<club_id>")
 def api_get_sailorname(club_id):

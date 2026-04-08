@@ -33,6 +33,7 @@ from services.schema_validation import (
     validate_race_finish_payload,
     validate_race_start_payload,
 )
+from services.error_responses import error_payload_for_exception
 
 
 def ensure_results_editable(race_row, race_is_locked):
@@ -273,7 +274,7 @@ def web_race_summary(db, race_id, club_id):
 
         return {"ok": True, "race": race_info, "results": results}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def mobile_control_start(
@@ -332,7 +333,7 @@ def mobile_control_start(
 
         return {"ok": True, "race_id": race_id}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def mobile_control_lap(
@@ -414,7 +415,7 @@ def mobile_control_lap(
 
         return {"ok": True}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def mobile_control_finish(
@@ -473,7 +474,7 @@ def mobile_control_finish(
 
         return {"ok": True}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def web_record_lap(
@@ -555,7 +556,7 @@ def web_record_lap(
 
         return {"ok": True}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def web_finish_race(
@@ -614,7 +615,7 @@ def web_finish_race(
 
         return {"ok": True}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def lock_results(
@@ -664,7 +665,7 @@ def lock_results(
 
         return {"ok": True, "race_id": race_id, "results_status": "locked"}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def unlock_results(
@@ -734,7 +735,7 @@ def unlock_results(
             },
         }, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -824,7 +825,7 @@ def add_race_entry(
 
         return {"ok": True, "race_id": race_id, "entry_id": entry_id}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def remove_race_entry(
@@ -888,7 +889,7 @@ def remove_race_entry(
 
         return {"ok": True, "race_id": race_id, "entry_id": entry_id}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -992,7 +993,7 @@ def edit_race_lap(
 
         return {"ok": True, "race_id": race_id, "lap_id": lap_id}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def delete_race_lap(
@@ -1052,4 +1053,4 @@ def delete_race_lap(
 
         return {"ok": True, "race_id": race_id, "lap_id": lap_id}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)

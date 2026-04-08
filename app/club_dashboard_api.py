@@ -14,6 +14,7 @@ from services.club_dashboard_repository import (
     get_sailors_with_boats,
     race_belongs_to_club,
 )
+from services.error_responses import error_payload_for_exception
 
 
 def _parse_date_yyyy_mm_dd(raw):
@@ -69,7 +70,7 @@ def dashboard_sailors_boats(db, club_id):
         }
         return payload, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def dashboard_landing_overview(db, club_id):
@@ -100,7 +101,7 @@ def dashboard_landing_overview(db, club_id):
             "summary": dict(stats or {}),
         }, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def dashboard_race_calendar(db, club_id, args):
@@ -123,7 +124,7 @@ def dashboard_race_calendar(db, club_id, args):
     except ValueError:
         return {"ok": False, "error": "Invalid query parameters"}, 400
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def dashboard_duty_roster(db, club_id, args):
@@ -146,7 +147,7 @@ def dashboard_duty_roster(db, club_id, args):
     except ValueError:
         return {"ok": False, "error": "Invalid query parameters"}, 400
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def dashboard_results_review_queue(db, club_id, args):
@@ -158,7 +159,7 @@ def dashboard_results_review_queue(db, club_id, args):
     except ValueError:
         return {"ok": False, "error": "Invalid query parameters"}, 400
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def dashboard_handicap_recommendations(db, club_id, args):
@@ -183,7 +184,7 @@ def dashboard_handicap_recommendations(db, club_id, args):
     except ValueError:
         return {"ok": False, "error": "Invalid query parameters"}, 400
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def dashboard_export_results_csv(db, club_id, race_id):
@@ -226,7 +227,7 @@ def dashboard_export_results_csv(db, club_id, race_id):
             "csv": buffer.getvalue(),
         }, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def parse_paper_csv(file_storage):
@@ -308,7 +309,7 @@ def dashboard_import_csv_preview(file_storage):
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}, 400
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def dashboard_import_csv_apply(

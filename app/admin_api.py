@@ -9,6 +9,7 @@ from services.admin_repository import (
     update_club_user_last_login,
 )
 from services.race_control_repository import get_race_for_club
+from services.error_responses import error_payload_for_exception
 
 
 def health_check(db):
@@ -17,7 +18,9 @@ def health_check(db):
             check_db_health(conn)
         return {"ok": True, "status": "healthy"}, 200
     except Exception as exc:
-        return {"ok": False, "status": "unhealthy", "error": str(exc)}, 500
+        payload, status = error_payload_for_exception(exc)
+        payload["status"] = "unhealthy"
+        return payload, status
 
 
 def admin_login(db, payload, grant_club_role):
@@ -45,7 +48,7 @@ def admin_login(db, payload, grant_club_role):
             "username": user_row["username"],
         }, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def load_test_race_session_seed(db):
@@ -83,7 +86,7 @@ def load_test_race_session_seed(db):
             },
         }, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def get_race_audit(db, race_id, club_id):
@@ -95,7 +98,7 @@ def get_race_audit(db, race_id, club_id):
             rows = get_race_audit_rows(conn, race_id)
         return {"ok": True, "race_id": race_id, "audit": [dict(r) for r in rows]}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def get_race_revisions(db, race_id, club_id):
@@ -107,7 +110,7 @@ def get_race_revisions(db, race_id, club_id):
             rows = get_race_revision_rows(conn, race_id)
         return {"ok": True, "race_id": race_id, "revisions": [dict(r) for r in rows]}, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 def decide_handicap_recommendation(
@@ -171,5 +174,5 @@ def decide_handicap_recommendation(
             "decision": decision,
         }, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 

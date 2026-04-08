@@ -40,6 +40,7 @@ from services.mobile_repository import (
     update_last_login,
     update_sailor_profile,
 )
+from services.error_responses import error_payload_for_exception
 
 
 def _secs_to_hms(s):
@@ -81,7 +82,7 @@ def build_control_access_response(db, session_dict, sailor_has_active_role):
             "assigned_race_ids": assigned_race_ids,
         }, 200
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}, 500
+        return error_payload_for_exception(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +128,7 @@ def mobile_login(db, payload, grant_sailor_role, set_mobile_session):
             "last_name": sailor_user["lastname"],
         }, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_register(db, payload, grant_sailor_role, set_mobile_session):
@@ -182,7 +183,7 @@ def mobile_register(db, payload, grant_sailor_role, set_mobile_session):
             "last_name": last_name or None,
         }, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +212,7 @@ def mobile_me(db, sailor_id, username):
             "boats": [dict(b) for b in boats],
         }, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_update_me(db, sailor_id, payload, session_dict):
@@ -247,7 +248,7 @@ def mobile_update_me(db, sailor_id, payload, session_dict):
 
         return {"ok": True}, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +261,7 @@ def mobile_clubs(db):
             rows = get_all_clubs(conn)
         return {"ok": True, "clubs": [dict(row) for row in rows]}, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_series(db, club_id, sailor_id):
@@ -271,7 +272,7 @@ def mobile_series(db, club_id, sailor_id):
             rows = get_series_for_club(conn, club_id)
         return {"ok": True, "series": [dict(row) for row in rows]}, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_boats(db, sailor_id):
@@ -280,7 +281,7 @@ def mobile_boats(db, sailor_id):
             boats = get_sailor_boats(conn, sailor_id)
         return {"ok": True, "boats": [dict(b) for b in boats]}, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_boat_classes(db):
@@ -289,7 +290,7 @@ def mobile_boat_classes(db):
             rows = get_boat_classes(conn)
         return {"ok": True, "classes": [dict(r) for r in rows]}, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_create_boat(db, sailor_id, payload):
@@ -319,7 +320,7 @@ def mobile_create_boat(db, sailor_id, payload):
             },
         }, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_delete_boat(db, sailor_id, boat_key):
@@ -330,7 +331,7 @@ def mobile_delete_boat(db, sailor_id, boat_key):
                 return {"ok": False, "error": "Boat not found"}, 404
         return {"ok": True}, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +346,7 @@ def mobile_upcoming_races(db, club_id, sailor_id):
             races = get_upcoming_races(conn, club_id, sailor_id)
         return {"ok": True, "races": [dict(r) for r in races]}, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_dashboard(db, sailor_id, session_dict):
@@ -393,7 +394,7 @@ def mobile_dashboard(db, sailor_id, session_dict):
             "series_positions": [dict(r) for r in positions],
         }, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_series_standings(db, sailor_id, session_dict):
@@ -412,7 +413,7 @@ def mobile_series_standings(db, sailor_id, session_dict):
 
         return {"ok": True, "standings": [dict(r) for r in rows]}, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +453,7 @@ def mobile_join_race(db, race_id, club_id, sailor_id, payload):
 
         return {"ok": True, "joined": True}, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_race_results(db, race_id, club_id, sailor_id):
@@ -489,7 +490,7 @@ def mobile_race_results(db, race_id, club_id, sailor_id):
             ],
         }, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 # ---------------------------------------------------------------------------
@@ -521,7 +522,7 @@ def mobile_control_upcoming_races(db, sailor_user_id, sailor_id, session_dict, s
             "can_race_control": bool(is_mobile_admin or rows),
         }, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_control_entries(db, race_id, club_id):
@@ -532,7 +533,7 @@ def mobile_control_entries(db, race_id, club_id):
             return {"ok": False, "error": "Race not found"}, 404
         return {"ok": True, "race": dict(race_row), "entries": [dict(r) for r in entries]}, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return error_payload_for_exception(e)
 
 
 def mobile_control_summary(db, race_id, club_id):
