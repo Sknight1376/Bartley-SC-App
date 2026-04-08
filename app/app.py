@@ -37,6 +37,13 @@ from mobile_api import (
     mobile_upcoming_races,
     mobile_update_me,
 )
+from members_api import (
+    members_assign_boat,
+    members_boat_catalog,
+    members_create,
+    members_list,
+    members_update,
+)
 from series_management import list_series_rules, create_series_rule
 from race_control import (
     add_race_entry,
@@ -1356,53 +1363,8 @@ def members_page():
 
 @app.get("/api/members")
 def api_get_members():
-    club_id = session.get("club_id")
-    if not club_id:
-        return jsonify({"ok": False, "error": "Unauthorized"}), 401
-
-    try:
-        with db.engine.connect() as conn:
-            rows = conn.execute(
-                text('''
-                    SELECT sc.key AS sailor_id,
-                           sc.fullname,
-                           sc.firstname,
-                           sc.lastname,
-                           bc.key AS boat_key,
-                           bc.sail_number,
-                           hc.boat AS boat_name,
-                           hc.handicap
-                    FROM "RACINGAPP"."SAILORCONTROL" sc
-                    LEFT JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.sailor = sc.key
-                    LEFT JOIN "RACINGAPP"."HANDICAPCONTROL" hc ON hc.key = bc.boat
-                    WHERE sc.club = :club_id
-                    ORDER BY sc.fullname, bc.key
-                '''),
-                {"club_id": club_id}
-            ).mappings().all()
-
-        members = {}
-        for r in rows:
-            sid = str(r["sailor_id"])
-            if sid not in members:
-                members[sid] = {
-                    "id": r["sailor_id"],
-                    "full_name": r["fullname"],
-                    "first_name": r["firstname"],
-                    "last_name": r["lastname"],
-                    "boats": []
-                }
-            if r["boat_key"] is not None:
-                members[sid]["boats"].append({
-                    "boat_key": r["boat_key"],
-                    "boat": r["boat_name"],
-                    "sail_number": r["sail_number"],
-                    "handicap": r["handicap"]
-                })
-
-        return jsonify({"ok": True, "members": list(members.values())})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = members_list(db, session.get("club_id"))
+    return jsonify(payload), status
 
 
 @app.post("/api/members")
@@ -1410,37 +1372,12 @@ def api_create_member():
     guard = require_club_admin()
     if guard is not None:
         return guard
-
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-    first_name = (payload.get("first_name") or "").strip()
-    last_name = (payload.get("last_name") or "").strip()
-    if not first_name:
-        return jsonify({"ok": False, "error": "first_name is required"}), 400
-
-    full_name = f"{first_name} {last_name}".strip()
-
-    try:
-        with db.engine.begin() as conn:
-            sailor_id = conn.execute(
-                text('''
-                    INSERT INTO "RACINGAPP"."SAILORCONTROL"
-                    (key, fullname, firstname, lastname, club)
-                    VALUES (nextval('key'), :fullname, :firstname, :lastname, :club)
-                    RETURNING key
-                '''),
-                {
-                    "fullname": full_name,
-                    "firstname": first_name,
-                    "lastname": last_name or None,
-                    "club": club_id
-                }
-            ).scalar()
-
-        return jsonify({"ok": True, "member_id": sailor_id})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = members_create(
+        db,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+    )
+    return jsonify(payload), status
 
 
 @app.put("/api/members/<int:member_id>")
@@ -1448,43 +1385,13 @@ def api_update_member(member_id):
     guard = require_club_admin()
     if guard is not None:
         return guard
-
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-    first_name = (payload.get("first_name") or "").strip()
-    last_name = (payload.get("last_name") or "").strip()
-    if not first_name:
-        return jsonify({"ok": False, "error": "first_name is required"}), 400
-
-    full_name = f"{first_name} {last_name}".strip()
-
-    try:
-        with db.engine.begin() as conn:
-            updated = conn.execute(
-                text('''
-                    UPDATE "RACINGAPP"."SAILORCONTROL"
-                    SET fullname = :fullname,
-                        firstname = :firstname,
-                        lastname = :lastname
-                    WHERE key = :member_id
-                      AND club = :club_id
-                '''),
-                {
-                    "fullname": full_name,
-                    "firstname": first_name,
-                    "lastname": last_name or None,
-                    "member_id": member_id,
-                    "club_id": club_id
-                }
-            )
-
-        if updated.rowcount == 0:
-            return jsonify({"ok": False, "error": "Member not found"}), 404
-
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = members_update(
+        db,
+        member_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+    )
+    return jsonify(payload), status
 
 
 @app.get("/api/boats/catalog")
@@ -1492,24 +1399,8 @@ def api_boat_catalog():
     guard = require_club_admin()
     if guard is not None:
         return guard
-
-    try:
-        with db.engine.connect() as conn:
-            rows = conn.execute(
-                text('''
-                    SELECT DISTINCT ON (hc.boat)
-                           hc.key,
-                           hc.boat,
-                           hc.handicap
-                    FROM "RACINGAPP"."HANDICAPCONTROL" hc
-                    ORDER BY hc.boat, hc.date DESC, hc.key DESC
-                ''')
-            ).mappings().all()
-
-        boats = [{"key": r["key"], "boat": r["boat"], "handicap": r["handicap"]} for r in rows]
-        return jsonify({"ok": True, "boats": boats})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = members_boat_catalog(db)
+    return jsonify(payload), status
 
 
 @app.post("/api/members/<int:member_id>/boats")
@@ -1517,37 +1408,13 @@ def api_assign_boat(member_id):
     guard = require_club_admin()
     if guard is not None:
         return guard
-
-    club_id = session.get("club_id")
-
-    payload = request.get_json(silent=True) or {}
-    handicap_key = payload.get("handicap_key")
-    sail_number = (payload.get("sail_number") or "").strip()
-    if not handicap_key or not sail_number:
-        return jsonify({"ok": False, "error": "handicap_key and sail_number are required"}), 400
-
-    try:
-        with db.engine.begin() as conn:
-            sailor_exists = conn.execute(
-                text('SELECT 1 FROM "RACINGAPP"."SAILORCONTROL" WHERE key = :member_id AND club = :club_id'),
-                {"member_id": member_id, "club_id": club_id}
-            ).scalar()
-
-            if not sailor_exists:
-                return jsonify({"ok": False, "error": "Member not found"}), 404
-
-            boat_key = conn.execute(
-                text('''
-                    INSERT INTO "RACINGAPP"."BOATCONTROL" (key, boat, sailor, sail_number)
-                    VALUES (nextval('key'), :boat, :sailor, :sail_number)
-                    RETURNING key
-                '''),
-                {"boat": handicap_key, "sailor": member_id, "sail_number": sail_number}
-            ).scalar()
-
-        return jsonify({"ok": True, "boat_key": boat_key})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    payload, status = members_assign_boat(
+        db,
+        member_id,
+        session.get("club_id"),
+        request.get_json(silent=True) or {},
+    )
+    return jsonify(payload), status
 
 
 @app.get("/series")

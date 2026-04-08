@@ -249,14 +249,14 @@ Options:
 - For club trust, never auto-apply handicap changes; surface recommendation bands, evidence, and approval workflow.
 
 
-Summary
-The architecture skeleton is in place and the highest-value routes (race-control lifecycle, retrospective, duties, audit) are fully extracted. Roughly 60–65% of inline SQL has been moved to repositories. To call this P0 complete you need:
+
 
 Extract remaining mobile routes into mobile_api.py + mobile_repository.py
 Extract members/boats routes (can go in a new members_api.py + members_repository.py)
 Extract the series CRUD routes into series_management.py + extend series_repository.py
 Broaden schema_validation.py to cover members, series, and mobile payloads
-Want to continue with one of those groups?
+
+
 
 
 
