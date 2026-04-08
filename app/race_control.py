@@ -27,6 +27,12 @@ from services.race_control_repository import (
     update_lap,
 )
 from services.schema_validation import validate_lap_payload
+from services.schema_validation import (
+    validate_control_start_payload,
+    validate_race_entry_payload,
+    validate_race_finish_payload,
+    validate_race_start_payload,
+)
 
 
 def ensure_results_editable(race_row, race_is_locked):
@@ -45,17 +51,26 @@ def web_start_race(
     create_race_revision,
     write_race_audit,
 ):
-    club_id = payload.get("club_id") or race_data.get("club_id") or session_club_id
-    series_id = payload.get("series_id") or race_data.get("series_id")
-    selected_race_id = payload.get("race_id") or race_data.get("race_id")
-    entries = payload.get("entries") or race_data.get("entries") or []
-    source_mode = (payload.get("source_mode") or "live").strip().lower()
-    if source_mode not in ("live", "retrospective"):
-        source_mode = "live"
-    reason = (payload.get("reason") or "Web race start").strip() or "Web race start"
+    effective_payload = {
+        **payload,
+        "club_id": payload.get("club_id") or race_data.get("club_id") or session_club_id,
+        "series_id": payload.get("series_id") or race_data.get("series_id"),
+        "race_id": payload.get("race_id") or race_data.get("race_id"),
+        "entries": payload.get("entries") if "entries" in payload else race_data.get("entries"),
+    }
 
-    if not club_id or not series_id:
-        return {"ok": False, "error": "Missing club_id or series_id"}, 400
+    try:
+        validated = validate_race_start_payload(effective_payload)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, 400
+
+    club_id = validated["club_id"]
+    series_id = validated["series_id"]
+    selected_race_id = validated["race_id"]
+    entries = validated["entries"] or []
+    source_mode = validated["source_mode"]
+    reason = validated["reason"]
+
     if str(club_id) != str(session_club_id):
         return {"ok": False, "error": "Forbidden"}, 403
     if not entries:
@@ -105,6 +120,8 @@ def web_start_race(
                     return {"ok": False, "error": "Results are locked for this race"}, 409
                 if selected["status"] == "finished":
                     return {"ok": False, "error": "Selected race is already finished"}, 409
+                if selected["status"] == "active":
+                    return {"ok": False, "error": "Selected race is already active"}, 409
 
                 race_id = selected["key"]
                 race_no = selected["race_no"]
@@ -269,10 +286,12 @@ def mobile_control_start(
     create_race_revision,
     write_race_audit,
 ):
-    source_mode = (payload.get("source_mode") or "live").strip().lower()
-    if source_mode not in ("live", "retrospective"):
-        source_mode = "live"
-    reason = (payload.get("reason") or "Mobile race start").strip() or "Mobile race start"
+    try:
+        validated_start = validate_control_start_payload(payload, "Mobile race start")
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, 400
+    source_mode = validated_start["source_mode"]
+    reason = validated_start["reason"]
 
     try:
         with db.engine.begin() as conn:
@@ -284,6 +303,8 @@ def mobile_control_start(
                 return {"ok": False, "error": error}, 409
             if race_row["status"] == "finished":
                 return {"ok": False, "error": "Race already finished"}, 409
+            if race_row["status"] == "active":
+                return {"ok": False, "error": "Race already active"}, 409
 
             set_race_active(conn, race_id, source_mode)
 
@@ -342,6 +363,8 @@ def mobile_control_lap(
                 return {"ok": False, "error": error}, 409
             if race_row["status"] == "finished":
                 return {"ok": False, "error": "Race already finished"}, 409
+            if race_row["status"] != "active":
+                return {"ok": False, "error": "Race is not active"}, 409
 
             if not race_entry_exists(conn, lap["entry_id"], race_id):
                 return {"ok": False, "error": "Race entry not found"}, 404
@@ -404,7 +427,10 @@ def mobile_control_finish(
     create_race_revision,
     write_race_audit,
 ):
-    reason = (payload.get("reason") or "Mobile race finish").strip() or "Mobile race finish"
+    try:
+        reason = validate_race_finish_payload(payload, "Mobile race finish")["reason"]
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, 400
     try:
         with db.engine.begin() as conn:
             race_row = get_race_for_club(conn, race_id, club_id)
@@ -413,6 +439,10 @@ def mobile_control_finish(
             editable, error = ensure_results_editable(race_row, race_is_locked)
             if not editable:
                 return {"ok": False, "error": error}, 409
+            if race_row["status"] == "finished":
+                return {"ok": False, "error": "Race already finished"}, 409
+            if race_row["status"] != "active":
+                return {"ok": False, "error": "Race is not active"}, 409
 
             updated = finish_race(conn, race_id, club_id)
 
@@ -474,6 +504,8 @@ def web_record_lap(
                 return {"ok": False, "error": error}, 409
             if race_row["status"] == "finished":
                 return {"ok": False, "error": "Race already finished"}, 409
+            if race_row["status"] != "active":
+                return {"ok": False, "error": "Race is not active"}, 409
 
             if not race_entry_exists(conn, lap["entry_id"], race_id):
                 return {"ok": False, "error": "Race entry not found"}, 404
@@ -536,7 +568,10 @@ def web_finish_race(
     create_race_revision,
     write_race_audit,
 ):
-    reason = (payload.get("reason") or "Web race finish").strip() or "Web race finish"
+    try:
+        reason = validate_race_finish_payload(payload, "Web race finish")["reason"]
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, 400
     try:
         with db.engine.begin() as conn:
             race_row = get_race_for_club(conn, race_id, club_id)
@@ -545,6 +580,10 @@ def web_finish_race(
             editable, error = ensure_results_editable(race_row, race_is_locked)
             if not editable:
                 return {"ok": False, "error": error}, 409
+            if race_row["status"] == "finished":
+                return {"ok": False, "error": "Race already finished"}, 409
+            if race_row["status"] != "active":
+                return {"ok": False, "error": "Race is not active"}, 409
 
             updated = finish_race(conn, race_id, club_id)
 
@@ -712,29 +751,17 @@ def add_race_entry(
     create_race_revision,
     write_race_audit,
 ):
-    reason = (payload.get("reason") or "Entry added").strip() or "Entry added"
+    try:
+        validated = validate_race_entry_payload(payload)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, 400
 
-    sailor = (payload.get("sailor") or "").strip()
-    boat = (payload.get("boat") or "").strip()
-    sail_number = (payload.get("sail_number") or payload.get("sailNumber") or "").strip()
-    if not sailor or not boat or not sail_number:
-        return {"ok": False, "error": "sailor, boat, and sail_number are required"}, 400
-
-    raw_boatkey = payload.get("boatkey") or payload.get("key")
-    boatkey = None
-    if raw_boatkey not in (None, "", "null"):
-        try:
-            boatkey = int(raw_boatkey)
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "Invalid boatkey"}, 400
-
-    handicap_raw = payload.get("handicap")
-    handicap = None
-    if handicap_raw not in (None, "", "N/A"):
-        try:
-            handicap = int(float(handicap_raw))
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "Invalid handicap"}, 400
+    reason = validated["reason"]
+    sailor = validated["sailor"]
+    boat = validated["boat"]
+    sail_number = validated["sail_number"]
+    boatkey = validated["boatkey"]
+    handicap = validated["handicap"]
 
     try:
         with db.engine.begin() as conn:
@@ -744,6 +771,8 @@ def add_race_entry(
             editable, error = ensure_results_editable(race_row, race_is_locked)
             if not editable:
                 return {"ok": False, "error": error}, 409
+            if race_row["status"] == "finished":
+                return {"ok": False, "error": "Race already finished"}, 409
 
             if boatkey is None:
                 boatkey = resolve_boatkey(conn, club_id, sailor, sail_number)

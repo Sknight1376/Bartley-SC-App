@@ -48,17 +48,127 @@ def validate_lap_payload(payload, parse_hms_to_seconds):
     if not all([entry_id, lap_number, elapsed_time]):
         raise ValueError("Missing required lap fields")
 
+    try:
+        entry_id = int(entry_id)
+        lap_number = int(lap_number)
+    except (TypeError, ValueError):
+        raise ValueError("entry_id and lap_number must be integers")
+
+    if entry_id <= 0 or lap_number <= 0:
+        raise ValueError("entry_id and lap_number must be > 0")
+
     elapsed_sec = parse_hms_to_seconds(elapsed_time)
     corrected_sec = parse_hms_to_seconds(corrected_time) if corrected_time and corrected_time != "N/A" else None
+
+    normalized_position = None
+    if position not in (None, "", "N/A"):
+        try:
+            normalized_position = int(position)
+        except (TypeError, ValueError):
+            raise ValueError("position must be an integer when provided")
+        if normalized_position <= 0:
+            raise ValueError("position must be > 0")
 
     return {
         "entry_id": entry_id,
         "lap_number": lap_number,
         "elapsed_sec": elapsed_sec,
         "corrected_sec": corrected_sec,
-        "position": position,
+        "position": normalized_position,
         "is_finish": is_finish,
     }
+
+
+def validate_race_start_payload(payload):
+    club_id = payload.get("club_id")
+    series_id = payload.get("series_id")
+    selected_race_id = payload.get("race_id")
+    entries = payload.get("entries")
+
+    if club_id in (None, ""):
+        raise ValueError("club_id is required")
+    if series_id in (None, ""):
+        raise ValueError("series_id is required")
+
+    try:
+        club_id = int(club_id)
+        series_id = int(series_id)
+    except (TypeError, ValueError):
+        raise ValueError("club_id and series_id must be integers")
+
+    race_id = None
+    if selected_race_id not in (None, ""):
+        try:
+            race_id = int(selected_race_id)
+        except (TypeError, ValueError):
+            raise ValueError("race_id must be an integer when provided")
+
+    if entries is not None and not isinstance(entries, list):
+        raise ValueError("entries must be an array when provided")
+
+    source_mode = (payload.get("source_mode") or "live").strip().lower()
+    if source_mode not in ("live", "retrospective"):
+        raise ValueError("source_mode must be 'live' or 'retrospective'")
+
+    reason = (payload.get("reason") or "Web race start").strip() or "Web race start"
+
+    return {
+        "club_id": club_id,
+        "series_id": series_id,
+        "race_id": race_id,
+        "entries": entries,
+        "source_mode": source_mode,
+        "reason": reason,
+    }
+
+
+def validate_control_start_payload(payload, default_reason):
+    source_mode = (payload.get("source_mode") or "live").strip().lower()
+    if source_mode not in ("live", "retrospective"):
+        raise ValueError("source_mode must be 'live' or 'retrospective'")
+
+    reason = (payload.get("reason") or default_reason).strip() or default_reason
+    return {"source_mode": source_mode, "reason": reason}
+
+
+def validate_race_entry_payload(payload):
+    sailor = (payload.get("sailor") or "").strip()
+    boat = (payload.get("boat") or "").strip()
+    sail_number = (payload.get("sail_number") or payload.get("sailNumber") or "").strip()
+    reason = (payload.get("reason") or "Entry added").strip() or "Entry added"
+
+    if not sailor or not boat or not sail_number:
+        raise ValueError("sailor, boat, and sail_number are required")
+
+    raw_boatkey = payload.get("boatkey") or payload.get("key")
+    boatkey = None
+    if raw_boatkey not in (None, "", "null"):
+        try:
+            boatkey = int(raw_boatkey)
+        except (TypeError, ValueError):
+            raise ValueError("Invalid boatkey")
+
+    handicap_raw = payload.get("handicap")
+    handicap = None
+    if handicap_raw not in (None, "", "N/A"):
+        try:
+            handicap = int(float(handicap_raw))
+        except (TypeError, ValueError):
+            raise ValueError("Invalid handicap")
+
+    return {
+        "sailor": sailor,
+        "boat": boat,
+        "sail_number": sail_number,
+        "boatkey": boatkey,
+        "handicap": handicap,
+        "reason": reason,
+    }
+
+
+def validate_race_finish_payload(payload, default_reason):
+    reason = (payload.get("reason") or default_reason).strip() or default_reason
+    return {"reason": reason}
 
 
 def validate_mobile_login_payload(payload):
