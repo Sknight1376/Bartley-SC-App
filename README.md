@@ -249,6 +249,14 @@ Options:
 - For club trust, never auto-apply handicap changes; surface recommendation bands, evidence, and approval workflow.
 
 
+Summary
+The architecture skeleton is in place and the highest-value routes (race-control lifecycle, retrospective, duties, audit) are fully extracted. Roughly 60–65% of inline SQL has been moved to repositories. To call this P0 complete you need:
+
+Extract remaining mobile routes into mobile_api.py + mobile_repository.py
+Extract members/boats routes (can go in a new members_api.py + members_repository.py)
+Extract the series CRUD routes into series_management.py + extend series_repository.py
+Broaden schema_validation.py to cover members, series, and mobile payloads
+Want to continue with one of those groups?
 
 
 
@@ -259,12 +267,7 @@ Options:
 
 
 
-
-
-
-
-
-**P0 Focus**
+<!-- **P0 Focus**
 - This is the right first slice. It solves your biggest real-world risks: wrong people changing races, no safe way to enter paper results later, and no audit trail when disputes happen.
 - The good news is your current schema and endpoints are close enough that this can be added incrementally rather than by rewriting the platform.
 
@@ -287,7 +290,7 @@ Options:
   - There is no publish/finalize state beyond `race.status = finished`.
   - That means there is no formal distinction between draft results, published results, and locked results.
 - **Audit history**
-  - There is no immutable audit table for race changes, lap edits, backfilled entries, unlocks, or handicap overrides.
+  - There is no immutable audit table for race changes, lap edits, backfilled entries, unlocks, or handicap overrides. -->
 
 <!-- **Recommended Data Model**
 - Add a `USER_ROLE` style mapping rather than overloading `CLUBUSER` or `SAILORUSER`.
