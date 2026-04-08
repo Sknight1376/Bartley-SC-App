@@ -67,7 +67,7 @@ def sailor_has_active_role(conn, sailor_user_id, sailor_id, club_id, role_codes,
     return bool(row)
 
 
-def sailor_has_race_duty(conn, sailor_user_id, sailor_id, race_id, role_code="race_officer", when_dt=None):
+def sailor_has_race_duty(conn, sailor_user_id, sailor_id, race_id, role_code="race_officer", when_dt=None, club_id=None):
     if not sailor_id or not race_id:
         return False
 
@@ -77,11 +77,13 @@ def sailor_has_race_duty(conn, sailor_user_id, sailor_id, race_id, role_code="ra
             SELECT 1
             FROM "RACINGAPP"."RACE_DUTY_ASSIGNMENT" rda
             JOIN "RACINGAPP"."ROLE" r ON r.key = rda.role
+            JOIN "RACINGAPP"."RACE" race ON race.key = rda.race_id
             WHERE rda.race_id = :race_id
               AND rda.sailor = :sailor_id
               AND (:sailor_user_id IS NULL OR rda.sailor_user IS NULL OR rda.sailor_user = :sailor_user_id)
               AND rda.status = 'assigned'
               AND r.code = :role_code
+              AND (:club_id IS NULL OR race.club = :club_id)
               AND (rda.starts_at IS NULL OR rda.starts_at <= :when_dt)
               AND (rda.ends_at IS NULL OR rda.ends_at >= :when_dt)
             LIMIT 1
@@ -91,6 +93,7 @@ def sailor_has_race_duty(conn, sailor_user_id, sailor_id, race_id, role_code="ra
             "sailor_id": int(sailor_id),
             "sailor_user_id": _to_int_or_none(sailor_user_id),
             "role_code": role_code,
+            "club_id": _to_int_or_none(club_id),
             "when_dt": when_dt,
         }
     ).scalar()
@@ -104,4 +107,4 @@ def sailor_can_access_race_control(conn, sailor_user_id, sailor_id, club_id, rac
     if race_id is None:
         return False
 
-    return sailor_has_race_duty(conn, sailor_user_id, sailor_id, race_id, "race_officer")
+    return sailor_has_race_duty(conn, sailor_user_id, sailor_id, race_id, "race_officer", club_id=club_id)

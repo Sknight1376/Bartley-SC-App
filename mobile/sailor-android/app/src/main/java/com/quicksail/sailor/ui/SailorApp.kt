@@ -558,7 +558,15 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar {
-                HomePage.values().forEach { page ->
+                // Once access is confirmed denied, hide Race Control entirely from the nav
+                // so non-duty sailors see a clean nav without a permanently greyed tab.
+                // While still loading (!controlAccessLoaded) keep the item so layout is stable.
+                val visiblePages = HomePage.values().filter { page ->
+                    page != HomePage.RACE_CONTROL ||
+                    !state.controlAccessLoaded ||
+                    state.canRaceControl
+                }
+                visiblePages.forEach { page ->
                     NavigationBarItem(
                         selected = homePage == page,
                         onClick = { onPageSelected(page) },

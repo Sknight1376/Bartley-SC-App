@@ -4,6 +4,7 @@ from sqlalchemy import text
 from datetime import datetime, timedelta, time, date
 import json
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -224,8 +225,8 @@ def sailor_has_active_role(conn, sailor_user_id, sailor_id, club_id, role_code):
     return permission_sailor_has_active_role(conn, sailor_user_id, sailor_id, club_id, role_code)
 
 
-def sailor_has_race_duty(conn, race_id, sailor_id, duty_code):
-    return permission_sailor_has_race_duty(conn, race_id, sailor_id, duty_code)
+def sailor_has_race_duty(conn, race_id, sailor_id, duty_code, sailor_user_id=None, club_id=None):
+    return permission_sailor_has_race_duty(conn, sailor_user_id, sailor_id, race_id, duty_code, club_id=club_id)
 
 
 def sailor_can_access_race_control(conn, sailor_user_id, sailor_id, club_id, race_id):
@@ -255,6 +256,11 @@ def require_mobile_race_control_access(race_id):
         return jsonify({"ok": False, "error": str(exc)}), 500
 
     if not allowed:
+        logging.warning(
+            "Race control access denied: sailor_user=%s sailor=%s club=%s race=%s",
+            session.get("sailor_user_id"), session.get("sailor_id"),
+            session.get("sailor_club_id"), race_id,
+        )
         return jsonify({"ok": False, "error": "Forbidden"}), 403
 
     return None

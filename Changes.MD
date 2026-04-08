@@ -26,7 +26,7 @@ Priority levels:
 
 ### Backend
 - [x] Remove hardcoded secrets / DB configuration and tighten unsafe SQL / HTTP defaults
-- [ ] Restrict mobile race-control capabilities by role/duty entitlement rather than club membership alone
+- [x] Restrict mobile race-control capabilities by role/duty entitlement rather than club membership alone
 - [ ] Store `race_id` when a race starts and introduce stable `entry_id` values per boat session
 - [ ] Enforce request payload schemas consistently and protect race actions with race-state validation
 - [ ] Catch DB disconnects consistently and return JSON errors where appropriate
