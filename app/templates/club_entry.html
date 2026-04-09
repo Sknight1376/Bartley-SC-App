@@ -5,12 +5,8 @@
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
 </head>
 <body>
-
-<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
-
-
-<section class="banner">
-</section>
+{% set active_nav = 'new_race' %}
+{% include 'partials/app_header.html' %}
 
   <br>
 

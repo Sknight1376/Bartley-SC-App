@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
   <style>
-    .wrap { width: 1000px; margin: 20px auto; }
+    .wrap { width: min(1000px, calc(100% - 24px)); margin: 20px auto; }
     .card { background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:16px; }
     .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
     .btn { background:#1331C5; color:#fff; border:0; border-radius:6px; height:36px; padding:0 14px; cursor:pointer; }
@@ -17,17 +19,16 @@
   </style>
 </head>
 <body data-current-series-id="{{ currentSeriesId or '' }}">
-<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
-<section class="banner"></section>
-<br>
+{% set active_nav = 'dashboard' %}
+{% include 'partials/app_header.html' %}
 
 <div class="form-border">
   <div class="entry-banner">
-    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">1. Add New Series</div>
-    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">2. Series Name</div>
-    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">3. Scheduling</div>
-    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color:#fff; text-align:center; line-height:40px;">4. Scoring</div>
-    <div style="color:#979797; text-align:center; line-height:40px;">5. Summary</div>
+    <div class="entry-step entry-step-complete">1. Add New Series</div>
+    <div class="entry-step entry-step-complete">2. Series Name</div>
+    <div class="entry-step entry-step-complete">3. Scheduling</div>
+    <div class="entry-step entry-step-active" style="border-top-right-radius: 120px; border-bottom-right-radius: 120px;">4. Scoring</div>
+    <div class="entry-step">5. Summary</div>
   </div>
   <br>
   <h4 style="color:#979797">Step Four</h4>
@@ -44,7 +45,7 @@
       <span id="status" class="muted"></span>
     </div>
     <div id="loadedState" class="info-banner">Loading current scoring for this series...</div>
-    <div class="muted" style="margin-top:8px;">Define thresholds: discard 1 after X races, discard 2 after Y races, etc.</div>
+    <div class="muted" style="margin-top:8px;">Define thresholds in plain terms: for example, discard 1 result after 4 races, then discard 2 results after 8 races.</div>
     <table class="mini-table">
       <thead><tr><th>Rule</th><th>After X Races</th><th>Action</th></tr></thead>
       <tbody id="discardRulesBody"></tbody>
@@ -54,7 +55,17 @@
 
 <div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
   <button class="blue-button" id="backBtn">Back</button>
-  <button class="blue-button" id="nextBtn">> Continue to Summary</button>
+  <button class="blue-button" id="nextBtn">Save and Continue</button>
+</div>
+
+<div id="scoringSaveMeta" class="muted" style="text-align:center; margin-top:10px; color:#1331C5;"></div>
+
+<div id="scoringConfirmStrip" class="confirm-strip">
+  <div id="scoringConfirmMessage">Confirm action</div>
+  <div class="confirm-strip-actions">
+    <button id="scoringConfirmOk" class="blue-button" style="position:static;">Confirm</button>
+    <button id="scoringConfirmCancel" class="blue-button" style="position:static; background:#6b7280;">Cancel</button>
+  </div>
 </div>
 
 <script>
@@ -62,6 +73,23 @@ let selectedSeriesId = null;
 let discardRules = [];
 let scoringDirty = false;
 let _navigatingAway = false;
+const scoringSaveMeta = document.getElementById('scoringSaveMeta');
+const scoringConfirmStrip = document.getElementById('scoringConfirmStrip');
+const scoringConfirmMessage = document.getElementById('scoringConfirmMessage');
+let pendingScoringConfirmAction = null;
+
+function formatSaveTime(){
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function refreshScoringSaveMeta(){
+  scoringSaveMeta.textContent = scoringDirty ? 'Unsaved changes' : (scoringSaveMeta.dataset.savedAt ? `Saved at ${scoringSaveMeta.dataset.savedAt}` : 'Loaded saved draft');
+}
+
+function markScoringSaved(){
+  scoringSaveMeta.dataset.savedAt = formatSaveTime();
+  refreshScoringSaveMeta();
+}
 
 const _beforeUnloadHandler = (e)=>{
   if(!scoringDirty || _navigatingAway) return;
@@ -70,6 +98,17 @@ const _beforeUnloadHandler = (e)=>{
 };
 
 function getSeriesId(){ return new URLSearchParams(window.location.search).get('series_id') || document.body.dataset.currentSeriesId || null; }
+
+function openScoringConfirm(message, onConfirm){
+  pendingScoringConfirmAction = onConfirm;
+  scoringConfirmMessage.textContent = message;
+  scoringConfirmStrip.classList.add('open');
+}
+
+function closeScoringConfirm(){
+  pendingScoringConfirmAction = null;
+  scoringConfirmStrip.classList.remove('open');
+}
 
 function setLoadedState(message){
   document.getElementById('loadedState').textContent = message;
@@ -97,6 +136,7 @@ function addDiscardRule(){
   const after = discardRules.length ? Number(discardRules[discardRules.length-1].after_races)+1 : 2;
   discardRules.push({ discard_count: next, after_races: after });
   scoringDirty = true;
+  refreshScoringSaveMeta();
   renderDiscardRules();
 }
 
@@ -104,10 +144,11 @@ function removeDiscardRule(idx){
   discardRules.splice(idx,1);
   discardRules = discardRules.map((r,i)=>({ discard_count:i+1, after_races:Number(r.after_races) }));
   scoringDirty = true;
+  refreshScoringSaveMeta();
   renderDiscardRules();
 }
 
-function updateDiscardAfter(idx,val){ discardRules[idx].after_races = Number(val||0); scoringDirty = true; }
+function updateDiscardAfter(idx,val){ discardRules[idx].after_races = Number(val||0); scoringDirty = true; refreshScoringSaveMeta(); }
 
 async function loadScoring(){
   const res=await fetch(`/api/series/manage/${selectedSeriesId}/scoring`,{cache:'no-store'});
@@ -121,23 +162,31 @@ async function loadScoring(){
   } else {
     setLoadedState('No saved discard rules yet. Add scoring rules for this series below.');
   }
+  refreshScoringSaveMeta();
 }
 
 async function saveScoring(){
   const payload={ discard_rules: discardRules.map((r,i)=>({ discard_count:i+1, after_races:Number(r.after_races) })) };
   if(payload.discard_rules.some(r=>!Number.isInteger(r.after_races)||r.after_races<1)){
-    alert('Each discard rule must have after_races >= 1');
+    document.getElementById('status').textContent='Each discard rule must have after_races >= 1';
     return false;
+  }
+  for (let i = 1; i < payload.discard_rules.length; i += 1) {
+    if (payload.discard_rules[i].after_races <= payload.discard_rules[i - 1].after_races) {
+      document.getElementById('status').textContent='Discard thresholds must increase as discard count increases.';
+      return false;
+    }
   }
   const res=await fetch(`/api/series/manage/${selectedSeriesId}/scoring`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const data=await res.json().catch(()=>({}));
   if(!res.ok||!data.ok){
-    alert(data.error||'Failed to save scoring');
+    document.getElementById('status').textContent = data.error||'Failed to save scoring';
     return false;
   }
   scoringDirty = false;
   document.getElementById('status').textContent='Scoring saved.';
   setLoadedState(`Loaded ${payload.discard_rules.length} saved discard rule${payload.discard_rules.length === 1 ? '' : 's'} for this series.`);
+  markScoringSaved();
   return true;
 }
 
@@ -151,7 +200,14 @@ async function continueToSummary(){
   selectedSeriesId=getSeriesId();
   if(!selectedSeriesId){ window.location.href='/series/new/name'; return; }
   document.getElementById('backBtn').addEventListener('click',()=>{
-    if(scoringDirty && !confirm('You have unsaved scoring changes. Leave without saving?')) return;
+    if(scoringDirty){
+      openScoringConfirm('Leave without saving scoring changes?', ()=>{
+        _navigatingAway = true;
+        closeScoringConfirm();
+        window.location.href=`/series/new/schedule?series_id=${selectedSeriesId}`;
+      });
+      return;
+    }
     _navigatingAway = true;
     window.location.href=`/series/new/schedule?series_id=${selectedSeriesId}`;
   });
@@ -159,10 +215,12 @@ async function continueToSummary(){
     _navigatingAway = true;
     continueToSummary();
   });
+  document.getElementById('scoringConfirmOk').addEventListener('click', ()=>{ if (pendingScoringConfirmAction) pendingScoringConfirmAction(); });
+  document.getElementById('scoringConfirmCancel').addEventListener('click', closeScoringConfirm);
   document.getElementById('addDiscardRuleBtn').addEventListener('click',addDiscardRule);
   document.getElementById('saveScoringBtn').addEventListener('click',saveScoring);
   window.addEventListener('beforeunload', _beforeUnloadHandler);
-  try { await Promise.all([loadSeriesHeader(), loadScoring()]); } catch(e){ alert(e.message||'Failed to load scoring'); }
+  try { await Promise.all([loadSeriesHeader(), loadScoring()]); } catch(e){ document.getElementById('status').textContent = e.message||'Failed to load scoring'; }
 })();
 </script>
 </body>

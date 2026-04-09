@@ -36,6 +36,7 @@ from mobile_api import (
     mobile_create_boat,
     mobile_dashboard,
     mobile_delete_boat,
+    mobile_duties,
     mobile_join_race,
     mobile_login,
     mobile_me,
@@ -52,6 +53,11 @@ from members_api import (
     members_create,
     members_list,
     members_update,
+)
+from members_api import (
+    members_app_registrations,
+    members_confirm_app_user,
+    members_link_app_user,
 )
 from series_management import (
     create_exception,
@@ -823,6 +829,15 @@ def api_mobile_control_access():
     return jsonify(payload), status
 
 
+@app.get("/api/mobile/duties")
+def api_mobile_duties():
+    sailor_id = session.get("sailor_id")
+    if not sailor_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    payload, status = mobile_duties(db, sailor_id)
+    return jsonify(payload), status
+
+
 @app.get("/api/mobile/races/<int:race_id>/control-entries")
 def api_mobile_control_entries(race_id):
     guard = require_mobile_race_control_access(race_id)
@@ -925,7 +940,7 @@ def landing_page():
     club_name = session.get("club_name")
     if not club_id:
         return redirect("/login")
-    return render_template("landing.html", clubName=club_name, username=session.get("username"))
+    return render_template("landing.html", clubName=club_name, clubId=club_id, username=session.get("username"))
 
 
 @app.get("/club_dashboard")
@@ -1109,6 +1124,35 @@ def api_assign_boat(member_id):
     return jsonify(payload), status
 
 
+@app.get("/api/members/app-registrations")
+def api_members_app_registrations():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+    payload, status = members_app_registrations(db, session.get("club_id"))
+    return jsonify(payload), status
+
+
+@app.post("/api/members/app-registrations/<int:sailor_user_id>/confirm")
+def api_members_confirm_app_user(sailor_user_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+    payload, status = members_confirm_app_user(db, sailor_user_id, session.get("club_id"))
+    return jsonify(payload), status
+
+
+@app.post("/api/members/app-registrations/<int:sailor_user_id>/link")
+def api_members_link_app_user(sailor_user_id):
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+    payload, status = members_link_app_user(
+        db, sailor_user_id, session.get("club_id"), request.get_json(silent=True) or {}
+    )
+    return jsonify(payload), status
+
+
 @app.get("/series")
 def series_page():
     guard = require_club_admin(redirect_to_login=True)
@@ -1231,7 +1275,11 @@ def api_series_manage_list():
     if guard is not None:
         return guard
 
-    payload, status = list_series(db, session.get("club_id"))
+    payload, status = list_series(
+        db,
+        session.get("club_id"),
+        ensure_series_schedule_tables,
+    )
     return jsonify(payload), status
 
 

@@ -11,10 +11,21 @@ def get_members_with_boats(conn, club_id):
                    bc.key AS boat_key,
                    bc.sail_number,
                    hc.boat AS boat_name,
-                   hc.handicap
+                   hc.handicap,
+                   su.key AS sailor_user_id,
+                   su.username AS app_username,
+                   su.is_active AS app_is_active,
+                   su.last_login AS app_last_login
             FROM "RACINGAPP"."SAILORCONTROL" sc
             LEFT JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.sailor = sc.key
             LEFT JOIN "RACINGAPP"."HANDICAPCONTROL" hc ON hc.key = bc.boat
+            LEFT JOIN LATERAL (
+                SELECT key, username, is_active, last_login
+                FROM "RACINGAPP"."SAILORUSER"
+                WHERE sailor = sc.key
+                ORDER BY key DESC
+                LIMIT 1
+            ) su ON TRUE
             WHERE sc.club = :club_id
             ORDER BY sc.fullname, bc.key
         '''),
@@ -70,6 +81,96 @@ def get_boat_catalog(conn):
             ORDER BY hc.boat, hc.date DESC, hc.key DESC
         ''')
     ).mappings().all()
+
+
+def get_app_registrations(conn, club_id):
+    """Sailors who registered via the app and are awaiting admin confirmation (is_active = FALSE)."""
+    return conn.execute(
+        text('''
+            SELECT sc.key AS sailor_id,
+                   sc.fullname,
+                   sc.firstname,
+                   sc.lastname,
+                   su.key AS sailor_user_id,
+                   su.username AS app_username,
+                   su.created_at AS registered_at
+            FROM "RACINGAPP"."SAILORCONTROL" sc
+            JOIN "RACINGAPP"."SAILORUSER" su ON su.sailor = sc.key
+            WHERE sc.club = :club_id
+              AND su.is_active = FALSE
+            ORDER BY su.created_at DESC
+        '''),
+        {"club_id": club_id}
+    ).mappings().all()
+
+
+def confirm_app_registration(conn, sailor_user_id, club_id):
+    """Activate a pending app registration, scoped to the club for safety."""
+    return conn.execute(
+        text('''
+            UPDATE "RACINGAPP"."SAILORUSER" su
+            SET is_active = TRUE
+            FROM "RACINGAPP"."SAILORCONTROL" sc
+            WHERE su.key = :sailor_user_id
+              AND su.sailor = sc.key
+              AND sc.club = :club_id
+        '''),
+        {"sailor_user_id": sailor_user_id, "club_id": club_id}
+    )
+
+
+def link_app_user_to_member(conn, sailor_user_id, target_sailor_id, club_id):
+    """Re-point a SAILORUSER to an existing SAILORCONTROL record and activate it.
+    Returns the old sailor_id so the caller can attempt cleanup."""
+    target_ok = conn.execute(
+        text('SELECT 1 FROM "RACINGAPP"."SAILORCONTROL" WHERE key = :sid AND club = :club_id'),
+        {"sid": target_sailor_id, "club_id": club_id}
+    ).scalar()
+    if not target_ok:
+        raise ValueError("Target member not found in this club")
+
+    old_sailor_id = conn.execute(
+        text('''
+            SELECT su.sailor
+            FROM "RACINGAPP"."SAILORUSER" su
+            JOIN "RACINGAPP"."SAILORCONTROL" sc ON sc.key = su.sailor
+            WHERE su.key = :uid
+              AND sc.club = :club_id
+            LIMIT 1
+        '''),
+        {"uid": sailor_user_id, "club_id": club_id}
+    ).scalar()
+    if old_sailor_id is None:
+        raise ValueError("Registration not found in this club")
+
+    conn.execute(
+        text('''
+            UPDATE "RACINGAPP"."SAILORUSER"
+            SET sailor = :target_sailor_id,
+                is_active = TRUE
+            WHERE key = :sailor_user_id
+        '''),
+        {"target_sailor_id": target_sailor_id, "sailor_user_id": sailor_user_id}
+    )
+    return old_sailor_id
+
+
+def delete_orphaned_sailor(conn, sailor_id, club_id):
+    """Delete a SAILORCONTROL record only when it has no boats and no app account."""
+    boat_count = conn.execute(
+        text('SELECT COUNT(*) FROM "RACINGAPP"."BOATCONTROL" WHERE sailor = :sid'),
+        {"sid": sailor_id}
+    ).scalar() or 0
+    user_count = conn.execute(
+        text('SELECT COUNT(*) FROM "RACINGAPP"."SAILORUSER" WHERE sailor = :sid'),
+        {"sid": sailor_id}
+    ).scalar() or 0
+    if boat_count > 0 or user_count > 0:
+        raise ValueError("Sailor still has boats or an app account; not deleted")
+    conn.execute(
+        text('DELETE FROM "RACINGAPP"."SAILORCONTROL" WHERE key = :sid AND club = :club_id'),
+        {"sid": sailor_id, "club_id": club_id}
+    )
 
 
 def member_exists(conn, member_id, club_id):

@@ -1,251 +1,425 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="static/js/jquery-3.6.3.min.js"></script>
-  <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Members &amp; Boats -- {{ clubName }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/styles.css') }}">
   <style>
-    .members-grid { width: 990px; margin: 20px auto; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-    .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 16px; }
-    .card h3 { margin: 0 0 12px; color: #1331C5; }
-    .field { margin-bottom: 10px; }
-    .field label { display:block; color:#444; margin-bottom:4px; font-size:13px; }
-    .field input, .field select { width:100%; height:36px; border:1px solid #d0d0d0; border-radius:6px; padding:0 10px; }
-    .members-table { width: 990px; margin: 10px auto 0; border-collapse: collapse; background:#fff; }
-    .members-table th { background:#e0e0e0; padding:8px 10px; border-bottom: 2px solid #d0d0d0; text-align:left; }
-    .members-table td { padding:8px 10px; border-bottom: 1px solid #ececec; vertical-align: top; }
-    .boats-list { margin:0; padding-left: 18px; }
-    .small-btn { background:#1331C5; color:#fff; border:0; border-radius:6px; height:32px; padding:0 10px; cursor:pointer; }
-    .small-btn.secondary { background:#6b7280; }
+    .members-wrap { max-width: 1100px; margin: 20px auto 60px; text-align: left; }
+    .mem-tabs { display: flex; gap: 4px; margin-top: 18px; border-bottom: 2px solid #dfe3fb; }
+    .mem-tab { padding: 10px 20px; border: 1px solid #dfe3fb; border-bottom: none; border-radius: 8px 8px 0 0; background: #f2f4ff; color: #1331C5; font-weight: 600; cursor: pointer; font-size: 14px; }
+    .mem-tab.active { background: #fff; border-bottom: 2px solid #fff; margin-bottom: -2px; }
+    .mem-tab .badge { display: inline-block; background: #dc2626; color: #fff; border-radius: 10px; font-size: 11px; font-weight: 700; padding: 0 6px; margin-left: 6px; line-height: 16px; }
+    .mem-card { background: #fff; border: 1px solid #dfe3fb; border-top: none; border-radius: 0 0 10px 10px; padding: 16px; }
+    .mem-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+    .mem-search { height: 34px; border: 1px solid #cfd6ff; border-radius: 6px; padding: 0 10px; min-width: 220px; font-size: 13px; }
+    .mem-btn { border: 1px solid #cfd6ff; background: #fff; color: #1331C5; padding: 5px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+    .mem-btn.primary { background: #1331C5; color: #fff; border-color: #1331C5; }
+    .mem-btn.muted { color: #6b7280; border-color: #e5e7eb; background: #f9fafb; }
+    .mem-add-form { background: #f8f9ff; border: 1px solid #dfe3fb; border-radius: 8px; padding: 12px 16px; display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 14px; }
+    .mem-add-field label { display: block; font-size: 12px; color: #444; margin-bottom: 3px; }
+    .mem-add-field input { height: 34px; border: 1px solid #cfd6ff; border-radius: 6px; padding: 0 8px; width: 180px; font-size: 13px; }
+    .mem-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .mem-table th { text-align: left; background: #f2f4ff; color: #223; padding: 8px 10px; border-bottom: 1px solid #dfe3fb; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    .mem-table td { padding: 8px 10px; border-bottom: 1px solid #eef1ff; vertical-align: top; }
+    .mem-table tbody tr:last-child > td { border-bottom: none; }
+    .mem-chip { display: inline-block; padding: 2px 8px; border-radius: 12px; background: #eef2ff; color: #233b9b; font-size: 12px; margin: 2px 2px 2px 0; }
+    .mem-chip.app-ok   { background: #d1fae5; color: #065f46; }
+    .mem-chip.app-pend { background: #fef3c7; color: #92400e; }
+    .mem-chip.app-none { background: #f1f5f9; color: #64748b; }
+    .mem-actions { display: flex; gap: 6px; }
+    .mem-expand td { padding: 0 !important; }
+    .expand-inner { padding: 12px 16px; background: #fafbff; border-top: 1px solid #eef1ff; display: flex; gap: 20px; flex-wrap: wrap; }
+    .expand-panel { background: #fff; border: 1px solid #dfe3fb; border-radius: 8px; padding: 14px 16px; min-width: 260px; }
+    .expand-panel h4 { margin: 0 0 10px; color: #1331C5; font-size: 13px; }
+    .expand-field { margin-bottom: 8px; }
+    .expand-field label { display: block; font-size: 12px; color: #444; margin-bottom: 3px; }
+    .expand-field input, .expand-field select { width: 100%; height: 32px; border: 1px solid #cfd6ff; border-radius: 6px; padding: 0 8px; font-size: 13px; box-sizing: border-box; }
+    .expand-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+    .mem-status { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
+    .mem-status.error   { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .mem-status.success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+    .mem-status.info    { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+    .inline-status { font-size: 12px; color: #b91c1c; }
+    .inline-status.ok { color: #166534; }
+    .muted-cell { color: #9ca3af; font-style: italic; font-size: 12px; padding: 12px 10px; }
+    .reg-desc { color: #6b7280; font-size: 13px; margin: 0 0 14px; line-height: 1.5; }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
+  {% set active_nav = 'dashboard' %}
+  {% include 'partials/app_header.html' %}
 
-<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
-<section class="banner"></section>
-<br>
-
-<div class="form-border" style="text-align:center;">
-  <h4 style="color:#979797">Club Administration</h4>
-  <h2>Members & Boats</h2>
-  <h4 style="color:#979797">{{ clubName }}</h4>
-</div>
-
-<div class="members-grid">
-  <div class="card">
-    <h3>Add Member</h3>
-    <div class="field">
-      <label for="firstName">First Name</label>
-      <input id="firstName" type="text" placeholder="e.g. Emma">
+  <div class="members-wrap">
+    <div class="form-border" style="text-align:center;">
+      <h4 style="color:#979797">Club Administration</h4>
+      <h2>Members &amp; Boats</h2>
+      <h4 style="color:#979797">{{ clubName }}</h4>
     </div>
-    <div class="field">
-      <label for="lastName">Last Name</label>
-      <input id="lastName" type="text" placeholder="e.g. Davis">
+
+    <div id="pageStatus" class="mem-status hidden"></div>
+
+    <div class="mem-tabs">
+      <button class="mem-tab active" data-tab="members">Members</button>
+      <button class="mem-tab" data-tab="registrations">
+        App Registrations
+        <span id="pendingBadge" class="badge hidden">0</span>
+      </button>
     </div>
-    <button id="addMemberBtn" class="small-btn">Add Member</button>
+
+    <!-- MEMBERS TAB -->
+    <div id="tab-members" class="mem-card">
+      <div class="mem-toolbar">
+        <input type="text" id="memberSearch" class="mem-search" placeholder="Search members..." aria-label="Search members">
+        <button class="mem-btn primary" id="showAddMemberBtn">+ Add Member</button>
+        <a href="/club_dashboard" class="mem-btn muted" style="text-decoration:none;">&larr; Back to Dashboard</a>
+      </div>
+
+      <div id="addMemberForm" class="mem-add-form hidden">
+        <div class="mem-add-field">
+          <label for="addFirstName">First Name</label>
+          <input id="addFirstName" type="text" placeholder="e.g. Emma">
+        </div>
+        <div class="mem-add-field">
+          <label for="addLastName">Last Name</label>
+          <input id="addLastName" type="text" placeholder="e.g. Davis">
+        </div>
+        <button class="mem-btn primary" id="addMemberSubmitBtn">Add</button>
+        <button class="mem-btn muted" id="cancelAddBtn">Cancel</button>
+        <span id="addMemberStatus" class="inline-status"></span>
+      </div>
+
+      <table class="mem-table" aria-label="Club members">
+        <thead>
+          <tr>
+            <th style="width:28%">Name</th>
+            <th style="width:36%">Boats</th>
+            <th style="width:14%">App</th>
+            <th style="width:22%">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="membersBody">
+          <tr><td colspan="4" class="muted-cell">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- APP REGISTRATIONS TAB -->
+    <div id="tab-registrations" class="mem-card hidden">
+      <p class="reg-desc">
+        Sailors who registered via the QuickSail mobile app. Their accounts are inactive until you confirm them here.
+        <strong>Confirm</strong> to activate as a new member, or <strong>Link</strong> to merge with an existing
+        manually-added member &mdash; the app account moves across and the duplicate record is removed.
+      </p>
+      <div id="regStatus" class="mem-status hidden"></div>
+      <table class="mem-table" aria-label="Pending app registrations">
+        <thead>
+          <tr>
+            <th style="width:22%">Name</th>
+            <th style="width:20%">Username</th>
+            <th style="width:14%">Registered</th>
+            <th style="width:44%">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="registrationsBody">
+          <tr><td colspan="4" class="muted-cell">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
-  <div class="card">
-    <h3>Assign New Boat</h3>
-    <div class="field">
-      <label for="memberSelect">Member</label>
-      <select id="memberSelect"></select>
-    </div>
-    <div class="field">
-      <label for="boatSelect">Boat Class</label>
-      <select id="boatSelect"></select>
-    </div>
-    <div class="field">
-      <label for="sailNumber">Sail Number</label>
-      <input id="sailNumber" type="text" placeholder="e.g. 3456">
-    </div>
-    <button id="assignBoatBtn" class="small-btn">Assign Boat</button>
-  </div>
-</div>
+  <script>
+  (function () {
+    var members = [];
+    var boatCatalog = [];
+    var openExpandId = null;
+    var openExpandType = null;
 
-<section style="width:990px; margin:16px auto 0;">
-  <table class="members-table">
-    <thead>
-      <tr>
-        <th style="width:26%;">Member</th>
-        <th style="width:46%;">Assigned Boats</th>
-        <th style="width:28%;">Edit Member</th>
-      </tr>
-    </thead>
-    <tbody id="membersBody"></tbody>
-  </table>
-</section>
+    function esc(v) {
+      return String(v == null ? '' : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function memberDisplayName(m) {
+      var full = (m.full_name || '').trim();
+      if (full) return full;
+      return ((m.first_name || '') + ' ' + (m.last_name || '')).trim() || 'Unknown';
+    }
+    function fmtDate(raw) {
+      if (!raw) return '';
+      return new Date(raw).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+    function setStatus(elId, msg, type) {
+      var el = document.getElementById(elId);
+      if (!el) return;
+      if (!msg) { el.classList.add('hidden'); return; }
+      el.className = 'mem-status ' + (type || 'info');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+    function setInlineStatus(el, msg, ok) {
+      if (!el) return;
+      el.className = ok ? 'inline-status ok' : 'inline-status';
+      el.textContent = msg;
+    }
+    function fetchJson(url, opts) {
+      return fetch(url, Object.assign({ cache: 'no-store' }, opts || {}))
+        .then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Request failed');
+            return data;
+          });
+        });
+    }
+    function postJson(url, body) {
+      return fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    }
+    function putJson(url, body) {
+      return fetchJson(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    }
 
-<div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
-  <button class="blue-button" onclick="window.location.href='/landing'">Back to Landing</button>
-</div>
+    /* tabs */
+    document.querySelectorAll('.mem-tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('.mem-tab').forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        var tab = btn.dataset.tab;
+        document.getElementById('tab-members').classList.toggle('hidden', tab !== 'members');
+        document.getElementById('tab-registrations').classList.toggle('hidden', tab !== 'registrations');
+      });
+    });
 
-<script>
-let members = [];
-let boatCatalog = [];
+    /* search */
+    document.getElementById('memberSearch').addEventListener('input', function () {
+      var q = this.value.toLowerCase();
+      document.querySelectorAll('.member-row').forEach(function (row) {
+        var match = !q || (row.dataset.name || '').indexOf(q) !== -1;
+        row.classList.toggle('hidden', !match);
+        var exp = document.getElementById('expand-' + row.dataset.id);
+        if (exp && !match) exp.classList.add('hidden');
+      });
+    });
 
-function escapeHtml(v) {
-  return String(v ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+    /* add member form */
+    document.getElementById('showAddMemberBtn').addEventListener('click', function () {
+      document.getElementById('addMemberForm').classList.remove('hidden');
+      document.getElementById('addFirstName').focus();
+    });
+    document.getElementById('cancelAddBtn').addEventListener('click', function () {
+      document.getElementById('addMemberForm').classList.add('hidden');
+      document.getElementById('addFirstName').value = '';
+      document.getElementById('addLastName').value = '';
+      document.getElementById('addMemberStatus').textContent = '';
+    });
+    document.getElementById('addMemberSubmitBtn').addEventListener('click', function () {
+      var first = document.getElementById('addFirstName').value.trim();
+      var last = document.getElementById('addLastName').value.trim();
+      var statusEl = document.getElementById('addMemberStatus');
+      if (!first) { setInlineStatus(statusEl, 'First name is required.', false); return; }
+      setInlineStatus(statusEl, 'Adding...', true);
+      postJson('/api/members', { first_name: first, last_name: last })
+        .then(function () {
+          document.getElementById('addFirstName').value = '';
+          document.getElementById('addLastName').value = '';
+          statusEl.textContent = '';
+          document.getElementById('addMemberForm').classList.add('hidden');
+          return loadMembers();
+        })
+        .catch(function (e) { setInlineStatus(statusEl, e.message || 'Failed to add member.', false); });
+    });
 
-function memberName(m) {
-  const full = (m.full_name || '').trim();
-  if (full) return full;
-  return `${m.first_name || ''} ${m.last_name || ''}`.trim();
-}
+    /* expand rows */
+    function toggleExpand(memberId, type) {
+      var expandRow = document.getElementById('expand-' + memberId);
+      if (!expandRow) return;
+      var same = openExpandId === memberId && openExpandType === type;
+      if (openExpandId !== null) {
+        var prev = document.getElementById('expand-' + openExpandId);
+        if (prev) prev.classList.add('hidden');
+      }
+      if (same) { openExpandId = null; openExpandType = null; return; }
+      var ep = document.getElementById('panel-edit-' + memberId);
+      var bp = document.getElementById('panel-boat-' + memberId);
+      if (ep) ep.classList.toggle('hidden', type !== 'edit');
+      if (bp) bp.classList.toggle('hidden', type !== 'boat');
+      expandRow.classList.remove('hidden');
+      openExpandId = memberId;
+      openExpandType = type;
+    }
 
-function refreshMemberSelect() {
-  const select = document.getElementById('memberSelect');
-  select.innerHTML = '<option value="">Select member…</option>';
-  members.forEach(m => {
-    const opt = document.createElement('option');
-    opt.value = m.id;
-    opt.textContent = memberName(m);
-    select.appendChild(opt);
-  });
-}
+    function saveMember(memberId) {
+      var first = document.getElementById('edit-first-' + memberId).value.trim();
+      var last = document.getElementById('edit-last-' + memberId).value.trim();
+      var statusEl = document.getElementById('edit-status-' + memberId);
+      if (!first) { setInlineStatus(statusEl, 'First name required.', false); return; }
+      setInlineStatus(statusEl, 'Saving...', true);
+      putJson('/api/members/' + memberId, { first_name: first, last_name: last })
+        .then(function () { openExpandId = null; openExpandType = null; return loadMembers(); })
+        .catch(function (e) { setInlineStatus(statusEl, e.message || 'Failed to save.', false); });
+    }
 
-function refreshBoatSelect() {
-  const select = document.getElementById('boatSelect');
-  select.innerHTML = '<option value="">Select boat class…</option>';
-  boatCatalog.forEach(b => {
-    const opt = document.createElement('option');
-    opt.value = b.key;
-    opt.textContent = `${b.boat} (HC ${b.handicap})`;
-    select.appendChild(opt);
-  });
-}
+    function assignBoat(memberId) {
+      var handicapKey = document.getElementById('boat-class-' + memberId).value;
+      var sailNumber = document.getElementById('boat-sail-' + memberId).value.trim();
+      var statusEl = document.getElementById('boat-status-' + memberId);
+      if (!handicapKey || !sailNumber) { setInlineStatus(statusEl, 'Select a class and enter sail number.', false); return; }
+      setInlineStatus(statusEl, 'Assigning...', true);
+      postJson('/api/members/' + memberId + '/boats', { handicap_key: handicapKey, sail_number: sailNumber })
+        .then(function () { openExpandId = null; openExpandType = null; return loadMembers(); })
+        .catch(function (e) { setInlineStatus(statusEl, e.message || 'Failed to assign boat.', false); });
+    }
 
-function renderMembers() {
-  const tbody = document.getElementById('membersBody');
-  tbody.innerHTML = '';
+    /* render members table */
+    function renderMembers() {
+      var tbody = document.getElementById('membersBody');
+      var boatOptions = boatCatalog.map(function (b) {
+        return '<option value="' + esc(b.key) + '">' + esc(b.boat) + ' (HC ' + esc(b.handicap) + ')</option>';
+      }).join('');
 
-  members.forEach(m => {
-    const tr = document.createElement('tr');
-    const boatsHtml = (m.boats && m.boats.length)
-      ? `<ul class="boats-list">${m.boats.map(b => `<li>${escapeHtml(b.boat)} — Sail ${escapeHtml(b.sail_number)} (HC ${escapeHtml(b.handicap)})</li>`).join('')}</ul>`
-      : '<span style="color:#999;">No boats assigned</span>';
+      if (!members.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="muted-cell">No members found.</td></tr>';
+        return;
+      }
 
-    tr.innerHTML = `
-      <td><strong>${escapeHtml(memberName(m))}</strong></td>
-      <td>${boatsHtml}</td>
-      <td>
-        <input id="edit-first-${m.id}" type="text" value="${escapeHtml(m.first_name || '')}" style="width:120px; height:30px; border:1px solid #d0d0d0; border-radius:6px; padding:0 8px; margin-right:6px;">
-        <input id="edit-last-${m.id}" type="text" value="${escapeHtml(m.last_name || '')}" style="width:120px; height:30px; border:1px solid #d0d0d0; border-radius:6px; padding:0 8px; margin-right:6px;">
-        <button class="small-btn secondary" onclick="saveMember(${m.id})">Save</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
+      tbody.innerHTML = members.map(function (m) {
+        var name = memberDisplayName(m);
+        var boatsHtml = (m.boats || []).length
+          ? m.boats.map(function (b) {
+              return '<span class="mem-chip" title="HC ' + esc(b.handicap) + '">' + esc(b.boat) + ' &middot; ' + esc(b.sail_number) + '</span>';
+            }).join('')
+          : '<span style="color:#9ca3af;font-size:12px;">No boats</span>';
 
-async function loadMembers() {
-  const res = await fetch('/api/members', { cache: 'no-store' });
-  const data = await res.json();
-  if (!res.ok || !data.ok) {
-    throw new Error(data.error || 'Failed to load members');
-  }
-  members = data.members || [];
-  refreshMemberSelect();
-  renderMembers();
-}
+        var appChip;
+        if (m.sailor_user_id) {
+          appChip = m.app_is_active
+            ? '<span class="mem-chip app-ok" title="@' + esc(m.app_username) + '">App &#10003;</span>'
+            : '<span class="mem-chip app-pend" title="@' + esc(m.app_username) + '">Pending</span>';
+        } else {
+          appChip = '<span class="mem-chip app-none">No app</span>';
+        }
 
-async function loadBoatCatalog() {
-  const res = await fetch('/api/boats/catalog', { cache: 'no-store' });
-  const data = await res.json();
-  if (!res.ok || !data.ok) {
-    throw new Error(data.error || 'Failed to load boats');
-  }
-  boatCatalog = data.boats || [];
-  refreshBoatSelect();
-}
+        return '<tr class="member-row" data-id="' + m.id + '" data-name="' + esc(name.toLowerCase()) + '">' +
+          '<td><strong>' + esc(name) + '</strong></td>' +
+          '<td>' + boatsHtml + '</td>' +
+          '<td>' + appChip + '</td>' +
+          '<td><div class="mem-actions">' +
+            '<button class="mem-btn" onclick="toggleExpand(' + m.id + ',\'edit\')">Edit</button>' +
+            '<button class="mem-btn" onclick="toggleExpand(' + m.id + ',\'boat\')">+ Boat</button>' +
+          '</div></td></tr>' +
+          '<tr id="expand-' + m.id + '" class="mem-expand hidden">' +
+            '<td colspan="4"><div class="expand-inner">' +
+              '<div id="panel-edit-' + m.id + '" class="expand-panel hidden">' +
+                '<h4>Edit Member</h4>' +
+                '<div class="expand-field"><label>First Name</label>' +
+                  '<input id="edit-first-' + m.id + '" type="text" value="' + esc(m.first_name || '') + '"></div>' +
+                '<div class="expand-field"><label>Last Name</label>' +
+                  '<input id="edit-last-' + m.id + '" type="text" value="' + esc(m.last_name || '') + '"></div>' +
+                '<div class="expand-actions">' +
+                  '<button class="mem-btn primary" onclick="saveMember(' + m.id + ')">Save</button>' +
+                  '<button class="mem-btn muted" onclick="toggleExpand(' + m.id + ',\'edit\')">Cancel</button>' +
+                  '<span id="edit-status-' + m.id + '" class="inline-status"></span>' +
+                '</div>' +
+              '</div>' +
+              '<div id="panel-boat-' + m.id + '" class="expand-panel hidden">' +
+                '<h4>Assign Boat</h4>' +
+                '<div class="expand-field"><label>Boat Class</label>' +
+                  '<select id="boat-class-' + m.id + '"><option value="">Select class...</option>' + boatOptions + '</select></div>' +
+                '<div class="expand-field"><label>Sail Number</label>' +
+                  '<input id="boat-sail-' + m.id + '" type="text" placeholder="e.g. 3456"></div>' +
+                '<div class="expand-actions">' +
+                  '<button class="mem-btn primary" onclick="assignBoat(' + m.id + ')">Assign</button>' +
+                  '<button class="mem-btn muted" onclick="toggleExpand(' + m.id + ',\'boat\')">Cancel</button>' +
+                  '<span id="boat-status-' + m.id + '" class="inline-status"></span>' +
+                '</div>' +
+              '</div>' +
+            '</div></td>' +
+          '</tr>';
+      }).join('');
+    }
 
-async function saveMember(memberId) {
-  const firstName = document.getElementById(`edit-first-${memberId}`).value.trim();
-  const lastName = document.getElementById(`edit-last-${memberId}`).value.trim();
+    /* render registrations table */
+    function renderRegistrations(registrations) {
+      var tbody = document.getElementById('registrationsBody');
+      var memberOptions = members
+        .filter(function (m) { return !m.sailor_user_id; })
+        .map(function (m) { return '<option value="' + m.id + '">' + esc(memberDisplayName(m)) + '</option>'; })
+        .join('');
 
-  if (!firstName) {
-    alert('First name is required.');
-    return;
-  }
+      if (!registrations.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="muted-cell">No pending app registrations.</td></tr>';
+        return;
+      }
 
-  const res = await fetch(`/api/members/${memberId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: firstName, last_name: lastName })
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.ok) {
-    alert(data.error || 'Failed to update member');
-    return;
-  }
+      tbody.innerHTML = registrations.map(function (r) {
+        return '<tr>' +
+          '<td><strong>' + esc(r.full_name) + '</strong></td>' +
+          '<td><code style="font-size:12px;">' + esc(r.app_username) + '</code></td>' +
+          '<td style="font-size:12px;white-space:nowrap;">' + fmtDate(r.registered_at) + '</td>' +
+          '<td><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+            '<button class="mem-btn primary" onclick="confirmRegistration(' + r.sailor_user_id + ')">Confirm</button>' +
+            '<div style="display:flex;gap:6px;align-items:center;">' +
+              '<select id="link-select-' + r.sailor_user_id + '" style="height:30px;border:1px solid #cfd6ff;border-radius:6px;padding:0 8px;font-size:12px;min-width:160px;">' +
+                '<option value="">Link to existing...</option>' + memberOptions +
+              '</select>' +
+              '<button class="mem-btn" onclick="linkRegistration(' + r.sailor_user_id + ')">Link</button>' +
+            '</div>' +
+          '</div></td></tr>';
+      }).join('');
+    }
 
-  await loadMembers();
-}
+    function confirmRegistration(sailorUserId) {
+      postJson('/api/members/app-registrations/' + sailorUserId + '/confirm', {})
+        .then(function () { setStatus('regStatus', 'Member confirmed and activated.', 'success'); return loadAll(); })
+        .catch(function (e) { setStatus('regStatus', e.message || 'Failed to confirm.', 'error'); });
+    }
 
-async function addMember() {
-  const firstName = document.getElementById('firstName').value.trim();
-  const lastName = document.getElementById('lastName').value.trim();
-  if (!firstName) {
-    alert('First name is required.');
-    return;
-  }
+    function linkRegistration(sailorUserId) {
+      var select = document.getElementById('link-select-' + sailorUserId);
+      var targetId = select ? select.value : '';
+      if (!targetId) { setStatus('regStatus', 'Select an existing member to link to.', 'error'); return; }
+      postJson('/api/members/app-registrations/' + sailorUserId + '/link', { target_sailor_id: Number(targetId) })
+        .then(function () { setStatus('regStatus', 'App account linked and activated.', 'success'); return loadAll(); })
+        .catch(function (e) { setStatus('regStatus', e.message || 'Failed to link.', 'error'); });
+    }
 
-  const res = await fetch('/api/members', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ first_name: firstName, last_name: lastName })
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.ok) {
-    alert(data.error || 'Failed to create member');
-    return;
-  }
+    /* loaders */
+    function loadMembers() {
+      return fetchJson('/api/members').then(function (data) { members = data.members || []; renderMembers(); });
+    }
+    function loadBoatCatalog() {
+      return fetchJson('/api/boats/catalog').then(function (data) { boatCatalog = data.boats || []; });
+    }
+    function loadRegistrations() {
+      return fetchJson('/api/members/app-registrations')
+        .then(function (data) {
+          var pending = data.registrations || [];
+          var badge = document.getElementById('pendingBadge');
+          badge.textContent = pending.length;
+          badge.classList.toggle('hidden', pending.length === 0);
+          renderRegistrations(pending);
+        })
+        .catch(function () {
+          document.getElementById('registrationsBody').innerHTML =
+            '<tr><td colspan="4" class="muted-cell">Unable to load app registrations right now.</td></tr>';
+        });
+    }
+    function loadAll() {
+      return loadBoatCatalog()
+        .then(function () { return loadMembers(); })
+        .then(function () { return loadRegistrations(); })
+        .catch(function (e) { setStatus('pageStatus', e.message || 'Failed to load page data.', 'error'); });
+    }
 
-  document.getElementById('firstName').value = '';
-  document.getElementById('lastName').value = '';
-  await loadMembers();
-}
+    window.toggleExpand = toggleExpand;
+    window.saveMember = saveMember;
+    window.assignBoat = assignBoat;
+    window.confirmRegistration = confirmRegistration;
+    window.linkRegistration = linkRegistration;
 
-async function assignBoat() {
-  const memberId = document.getElementById('memberSelect').value;
-  const handicapKey = document.getElementById('boatSelect').value;
-  const sailNumber = document.getElementById('sailNumber').value.trim();
-
-  if (!memberId || !handicapKey || !sailNumber) {
-    alert('Select member, boat class, and sail number.');
-    return;
-  }
-
-  const res = await fetch(`/api/members/${memberId}/boats`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ handicap_key: handicapKey, sail_number: sailNumber })
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.ok) {
-    alert(data.error || 'Failed to assign boat');
-    return;
-  }
-
-  document.getElementById('sailNumber').value = '';
-  await loadMembers();
-}
-
-document.getElementById('addMemberBtn').addEventListener('click', addMember);
-document.getElementById('assignBoatBtn').addEventListener('click', assignBoat);
-
-(async function init() {
-  try {
-    await Promise.all([loadBoatCatalog(), loadMembers()]);
-  } catch (e) {
-    alert(e.message || 'Failed to load member admin page');
-  }
-})();
-</script>
+    loadAll();
+  })();
+  </script>
 </body>
 </html>

@@ -457,6 +457,7 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
     var notifyUpcoming by rememberSaveable { mutableStateOf(NotificationCenter.isUpcomingEnabled()) }
     var notifyResults by rememberSaveable { mutableStateOf(NotificationCenter.isResultsEnabled()) }
     var notifySeries by rememberSaveable { mutableStateOf(NotificationCenter.isSeriesEnabled()) }
+    var notifyDuty by rememberSaveable { mutableStateOf(NotificationCenter.isDutyEnabled()) }
     var onboardingDismissed by rememberSaveable(state.login?.sailor_id) {
         mutableStateOf(Network.isOnboardingDismissed(state.login?.sailor_id))
     }
@@ -705,6 +706,7 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                             upcomingEnabled = notifyUpcoming,
                             resultsEnabled = notifyResults,
                             seriesEnabled = notifySeries,
+                            dutyEnabled = notifyDuty,
                             onUpcomingChange = {
                                 notifyUpcoming = it
                                 NotificationCenter.setUpcomingEnabled(it)
@@ -716,6 +718,10 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                             onSeriesChange = {
                                 notifySeries = it
                                 NotificationCenter.setSeriesEnabled(it)
+                            },
+                            onDutyChange = {
+                                notifyDuty = it
+                                NotificationCenter.setDutyEnabled(it)
                             },
                             onTestUpcoming = { NotificationCenter.sendTestUpcomingNotification() },
                             onTestResults = { NotificationCenter.sendTestResultNotification() },
@@ -1421,9 +1427,11 @@ private fun NotificationSettingsCard(
     upcomingEnabled: Boolean,
     resultsEnabled: Boolean,
     seriesEnabled: Boolean,
+    dutyEnabled: Boolean,
     onUpcomingChange: (Boolean) -> Unit,
     onResultsChange: (Boolean) -> Unit,
     onSeriesChange: (Boolean) -> Unit,
+    onDutyChange: (Boolean) -> Unit,
     onTestUpcoming: () -> Unit,
     onTestResults: () -> Unit,
     onTestSeries: () -> Unit,
@@ -1467,6 +1475,15 @@ private fun NotificationSettingsCard(
             ) {
                 Text("Series end & results ready")
                 Switch(checked = seriesEnabled, onCheckedChange = onSeriesChange)
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Duty reminders")
+                Switch(checked = dutyEnabled, onCheckedChange = onDutyChange)
             }
 
             HorizontalDivider()

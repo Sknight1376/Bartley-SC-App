@@ -1,0 +1,71 @@
+<header class="app-header" role="banner">
+  <section class="banner app-top-banner">
+    <div class="app-banner-inner">
+      <a class="app-brand" href="/landing" aria-label="Go to home">QuickSail</a>
+
+      <nav class="app-menu-shell" id="appMenuShell" aria-label="Primary">
+        <button type="button" class="app-menu-trigger" id="appMenuTrigger" aria-haspopup="true" aria-expanded="false" aria-controls="appMenuPopover">Menu ▾</button>
+        <div class="app-menu-popover" id="appMenuPopover" role="menu" hidden>
+          <a class="app-menu-link {% if active_nav == 'home' %}active{% endif %}" href="/landing" role="menuitem" {% if active_nav == 'home' %}aria-current="page"{% endif %}>Home</a>
+          <a class="app-menu-link {% if active_nav == 'new_race' %}active{% endif %}" href="/club_entry" role="menuitem" {% if active_nav == 'new_race' %}aria-current="page"{% endif %}>New Race</a>
+          <a class="app-menu-link {% if active_nav == 'dashboard' %}active{% endif %}" href="/club_dashboard" role="menuitem" {% if active_nav == 'dashboard' %}aria-current="page"{% endif %}>Club Dashboard</a>
+          <a class="app-menu-link danger" href="#" id="globalLogoutLink" role="menuitem">Logout</a>
+        </div>
+      </nav>
+    </div>
+  </section>
+</header>
+
+<script>
+(function(){
+  const shell = document.getElementById('appMenuShell');
+  const trigger = document.getElementById('appMenuTrigger');
+  const popover = document.getElementById('appMenuPopover');
+  const logoutLink = document.getElementById('globalLogoutLink');
+
+  if (shell && trigger && popover && trigger.dataset.menuBound !== '1') {
+    trigger.dataset.menuBound = '1';
+
+    function closeMenu() {
+      shell.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+      popover.hidden = true;
+    }
+
+    function openMenu() {
+      shell.classList.add('open');
+      trigger.setAttribute('aria-expanded', 'true');
+      popover.hidden = false;
+    }
+
+    trigger.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (shell.classList.contains('open')) closeMenu();
+      else openMenu();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!shell.contains(e.target)) closeMenu();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeMenu();
+    });
+
+    popover.querySelectorAll('a[role="menuitem"]').forEach((link) => {
+      link.addEventListener('click', () => closeMenu());
+    });
+  }
+
+  if (!logoutLink || logoutLink.dataset.bound === '1') return;
+  logoutLink.dataset.bound = '1';
+  logoutLink.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+    } catch (_) {}
+    sessionStorage.clear();
+    window.location.href = '/';
+  });
+})();
+</script>

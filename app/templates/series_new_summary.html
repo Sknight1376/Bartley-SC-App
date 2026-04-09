@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
   <style>
-    .wrap { width: 1000px; margin: 20px auto; }
+    .wrap { width: min(1000px, calc(100% - 24px)); margin: 20px auto; }
     .card { background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:16px; margin-bottom:16px; }
     .row { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
     .field { min-width:170px; }
@@ -13,21 +15,36 @@
     .mini-table { width:100%; border-collapse:collapse; background:#fff; font-size:13px; margin-top:8px; }
     .mini-table th,.mini-table td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
     .muted { color:#666; font-size:12px; }
-    .info-banner { margin: 20px auto 0; width: 1000px; padding:10px 12px; border-radius:8px; background:#f7f8ff; border:1px solid #d7d9fd; color:#4250a6; font-size:13px; box-sizing:border-box; }
+    .info-banner { margin: 20px auto 0; width: min(1000px, calc(100% - 24px)); padding:10px 12px; border-radius:8px; background:#f7f8ff; border:1px solid #d7d9fd; color:#4250a6; font-size:13px; box-sizing:border-box; }
+    .summary-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:12px; }
+    .summary-header h4 { margin:0; }
+    .summary-link { color:#1331C5; font-size:12px; font-weight:600; text-decoration:none; }
+    .checklist { margin:16px auto 0; width:min(1000px, calc(100% - 24px)); display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; }
+    .check-item { background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:12px 14px; font-size:13px; }
+    .check-item strong { display:block; margin-bottom:4px; }
+    .check-ok { border-color:#bbf7d0; background:#f0fdf4; }
+    .check-warn { border-color:#fde68a; background:#fffbeb; }
+    @media (max-width: 900px) {
+      .checklist { grid-template-columns: 1fr 1fr; }
+      .summary-header { flex-wrap: wrap; align-items: flex-start; }
+    }
+    @media (max-width: 640px) {
+      .checklist { grid-template-columns: 1fr; }
+      .mini-table { display:block; overflow-x:auto; }
+    }
   </style>
 </head>
 <body data-current-series-id="{{ currentSeriesId or '' }}">
-<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
-<section class="banner"></section>
-<br>
+{% set active_nav = 'dashboard' %}
+{% include 'partials/app_header.html' %}
 
 <div class="form-border">
   <div class="entry-banner">
-    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">1. Add New Series</div>
-    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">2. Series Name</div>
-    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">3. Scheduling</div>
-    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">4. Scoring</div>
-    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color:#fff; text-align:center; line-height:40px;">5. Summary</div>
+    <div class="entry-step entry-step-complete">1. Add New Series</div>
+    <div class="entry-step entry-step-complete">2. Series Name</div>
+    <div class="entry-step entry-step-complete">3. Scheduling</div>
+    <div class="entry-step entry-step-complete">4. Scoring</div>
+    <div class="entry-step entry-step-active" style="border-top-right-radius: 120px; border-bottom-right-radius: 120px;">5. Summary</div>
   </div>
   <br>
   <h4 style="color:#979797">Step Five</h4>
@@ -37,24 +54,46 @@
 
 <div id="loadedState" class="info-banner">Loading current saved setup for this series...</div>
 
+<div id="summaryChecklist" class="checklist"></div>
+
+<div class="wizard-grid" style="margin-top:16px;">
+  <div class="wizard-card">
+    <h5>Setup progress</h5>
+    <span id="summaryProgressPill" class="wizard-pill info">Loading</span>
+    <span id="summaryProgressMetric" class="wizard-metric">0/4</span>
+    <p id="summaryProgressCopy">Checking the current series setup.</p>
+  </div>
+  <div class="wizard-card">
+    <h5>Generation readiness</h5>
+    <span id="summaryReadyPill" class="wizard-pill warn">Checking</span>
+    <p id="summaryReadyCopy">A schedule rule is required before races can be generated.</p>
+  </div>
+  <div class="wizard-card">
+    <h5>Current output</h5>
+    <span id="summaryRaceMetric" class="wizard-metric">0</span>
+    <p id="summaryRaceCopy">Generated races will appear here after you run the planner.</p>
+  </div>
+</div>
+
 <div class="wrap">
   <div class="card">
-    <h4>Schedule Rules</h4>
+    <div class="summary-header"><h4>Schedule Rules</h4><a class="summary-link" href="#" id="editScheduleLink">Edit schedule</a></div>
     <table class="mini-table"><thead><tr><th>Weekday</th><th>Times</th><th>Cadence</th><th>Races</th><th>Range</th></tr></thead><tbody id="rulesBody"></tbody></table>
   </div>
 
   <div class="card">
-    <h4>Exception Days</h4>
+    <div class="summary-header"><h4>Exception Days</h4><a class="summary-link" href="#" id="editExceptionsLink">Edit schedule</a></div>
     <table class="mini-table"><thead><tr><th>Date</th><th>Note</th></tr></thead><tbody id="exceptionsBody"></tbody></table>
   </div>
 
   <div class="card">
-    <h4>Scoring</h4>
+    <div class="summary-header"><h4>Scoring</h4><a class="summary-link" href="#" id="editScoringLink">Edit scoring</a></div>
     <table class="mini-table"><thead><tr><th>Rule</th><th>After X Races</th></tr></thead><tbody id="scoringBody"></tbody></table>
   </div>
 
   <div class="card">
     <h4>Generate Races</h4>
+    <div id="generateBanner" class="status-banner status-info" style="display:none; margin-bottom:12px;"></div>
     <div class="row">
       <div class="field"><label for="genFromDate">From</label><input id="genFromDate" type="date"></div>
       <div class="field"><label for="genToDate">To</label><input id="genToDate" type="date"></div>
@@ -67,14 +106,92 @@
 
 <div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
   <button class="blue-button" id="backBtn">Back</button>
-  <button class="blue-button" onclick="window.location.href='/series'">Finish</button>
+  <button class="blue-button" onclick="window.location.href='/series'">Finish Setup</button>
 </div>
 
 <script>
 let selectedSeriesId = null;
+let summaryRules = [];
+let summaryScoringRules = [];
+let summaryExceptionCount = 0;
+let generatedRaceCount = 0;
 function getSeriesId(){ return new URLSearchParams(window.location.search).get('series_id') || document.body.dataset.currentSeriesId || null; }
 function esc(v){ return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#039;'); }
 function fmtWeekday(n){ const d=['Mon','Tue','Wed','Thu','Fri','Sat','Sun']; return Number.isInteger(Number(n)) ? d[Number(n)] ?? String(n) : String(n); }
+
+function setGenerateBanner(type, message) {
+  const banner = document.getElementById('generateBanner');
+  if (!message) {
+    banner.style.display = 'none';
+    banner.textContent = '';
+    banner.className = 'status-banner status-info';
+    return;
+  }
+  banner.style.display = 'block';
+  banner.className = `status-banner ${type === 'error' ? 'status-error' : type === 'success' ? 'status-success' : 'status-info'}`;
+  banner.textContent = message;
+}
+
+function updateSummaryHighlights(seriesName, rules, scoringRules, races) {
+  const completedCount = [!!seriesName, rules.length > 0, scoringRules.length > 0, races.length > 0].filter(Boolean).length;
+  const progressPill = document.getElementById('summaryProgressPill');
+  const readyPill = document.getElementById('summaryReadyPill');
+  document.getElementById('summaryProgressMetric').textContent = `${completedCount}/4`;
+  document.getElementById('summaryRaceMetric').textContent = String(races.length);
+  generatedRaceCount = races.length;
+
+  if (races.length > 0) {
+    progressPill.className = 'wizard-pill success';
+    progressPill.textContent = 'Live draft';
+    document.getElementById('summaryProgressCopy').textContent = 'This series already has generated races. Use the tables below to review the current setup and output.';
+  } else if (rules.length > 0 && scoringRules.length > 0) {
+    progressPill.className = 'wizard-pill success';
+    progressPill.textContent = 'Ready for review';
+    document.getElementById('summaryProgressCopy').textContent = 'Core setup is complete. Confirm the date range, then generate races when you are satisfied.';
+  } else {
+    progressPill.className = 'wizard-pill warn';
+    progressPill.textContent = 'Needs attention';
+    document.getElementById('summaryProgressCopy').textContent = 'Use the edit links below to finish any missing setup before generating races.';
+  }
+
+  if (rules.length > 0) {
+    readyPill.className = 'wizard-pill success';
+    readyPill.textContent = 'Can generate';
+    document.getElementById('summaryReadyCopy').textContent = `${rules.length} schedule rule${rules.length === 1 ? '' : 's'} configured with ${summaryExceptionCount} exception${summaryExceptionCount === 1 ? '' : 's'} applied.`;
+  } else {
+    readyPill.className = 'wizard-pill warn';
+    readyPill.textContent = 'Blocked';
+    document.getElementById('summaryReadyCopy').textContent = 'Add at least one schedule rule before races can be generated.';
+  }
+
+  document.getElementById('summaryRaceCopy').textContent = races.length
+    ? 'Generated races are listed below. Re-running generation will only add new races within the selected range.'
+    : 'No races generated yet. Pick a date range and run the planner when the setup looks right.';
+}
+
+function renderChecklist(seriesName, rules, scoringRules) {
+  const checklist = document.getElementById('summaryChecklist');
+  const items = [
+    { label: 'Series name', ok: !!seriesName, detail: seriesName || 'Missing' },
+    { label: 'Schedule rules', ok: rules.length > 0, detail: rules.length ? `${rules.length} configured` : 'Add at least one rule' },
+    { label: 'Scoring', ok: true, detail: scoringRules.length ? `${scoringRules.length} discard rule(s)` : 'No discard rules configured' },
+    { label: 'Ready to generate', ok: rules.length > 0, detail: rules.length ? 'Choose a date range below' : 'Needs schedule rules first' },
+  ];
+  checklist.innerHTML = items.map(item => `
+    <div class="check-item ${item.ok ? 'check-ok' : 'check-warn'}">
+      <strong>${esc(item.label)}</strong>
+      <span>${esc(item.detail)}</span>
+    </div>
+  `).join('');
+  document.getElementById('generateBtn').disabled = rules.length === 0;
+  document.getElementById('generateBtn').style.opacity = rules.length === 0 ? '0.6' : '1';
+  document.getElementById('generateBtn').style.cursor = rules.length === 0 ? 'not-allowed' : 'pointer';
+  if (!rules.length) {
+    setGenerateBanner('info', 'Generation is blocked until at least one schedule rule is configured.');
+  } else if (!generatedRaceCount) {
+    setGenerateBanner('info', 'Choose a date range, then generate the first set of races for this series.');
+  }
+}
 
 function setDefaultGenerateDates(rules){
   const today = new Date();
@@ -108,18 +225,22 @@ async function loadAll(){
   const scoreData = await scoreRes.json().catch(()=>({}));
   const racesData = await racesRes.json().catch(()=>({}));
 
-  if(seriesRes.ok && seriesData.ok && seriesData.series){ document.getElementById('seriesHeader').textContent = `${seriesData.series.name} (${seriesData.series.year})`; }
+  const seriesName = seriesRes.ok && seriesData.ok && seriesData.series ? seriesData.series.name : '';
+  if(seriesName){ document.getElementById('seriesHeader').textContent = `${seriesData.series.name} (${seriesData.series.year})`; }
 
   const rulesBody = document.getElementById('rulesBody'); rulesBody.innerHTML='';
-  (rulesData.rules||[]).forEach(r=>{ const times=[r.start_time].concat(String(r.extra_start_times||'').split(',').map(v=>v.trim()).filter(Boolean)).join(', '); const tr=document.createElement('tr'); tr.innerHTML=`<td>${esc(fmtWeekday(r.weekday))}</td><td>${esc(times)}</td><td>${esc(r.cadence_weeks)}w</td><td>${esc(r.target_race_count||'-')}</td><td>${esc(r.valid_from)} → ${esc(r.valid_to||'-')}</td>`; rulesBody.appendChild(tr);});
+  summaryRules = rulesData.rules || [];
+  summaryRules.forEach(r=>{ const times=[r.start_time].concat(String(r.extra_start_times||'').split(',').map(v=>v.trim()).filter(Boolean)).join(', '); const tr=document.createElement('tr'); tr.innerHTML=`<td>${esc(fmtWeekday(r.weekday))}</td><td>${esc(times)}</td><td>${esc(r.cadence_weeks)}w</td><td>${esc(r.target_race_count||'-')}</td><td>${esc(r.valid_from)} → ${esc(r.valid_to||'-')}</td>`; rulesBody.appendChild(tr);});
   if(!rulesBody.children.length){ const tr=document.createElement('tr'); tr.innerHTML='<td colspan="5" style="color:#888;">No rules configured.</td>'; rulesBody.appendChild(tr);} 
 
   const exBody = document.getElementById('exceptionsBody'); exBody.innerHTML='';
+  summaryExceptionCount = (exData.exceptions || []).length;
   (exData.exceptions||[]).forEach(x=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${esc(x.exception_date||'-')}</td><td>${esc(x.note||'')}</td>`; exBody.appendChild(tr);});
   if(!exBody.children.length){ const tr=document.createElement('tr'); tr.innerHTML='<td colspan="2" style="color:#888;">No exception days configured.</td>'; exBody.appendChild(tr);} 
 
   const scoreBody=document.getElementById('scoringBody'); scoreBody.innerHTML='';
   const dr=(scoreData.scoring&&scoreData.scoring.discard_rules)||[];
+  summaryScoringRules = dr;
   dr.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>Discard ${esc(r.discard_count)}</td><td>${esc(r.after_races)}</td>`; scoreBody.appendChild(tr);});
   if(!scoreBody.children.length){ const tr=document.createElement('tr'); tr.innerHTML='<td colspan="2" style="color:#888;">No discard rules configured.</td>'; scoreBody.appendChild(tr);} 
 
@@ -127,8 +248,11 @@ async function loadAll(){
   const exceptionCount = (exData.exceptions || []).length;
   const discardCount = dr.length;
   setLoadedState(`Showing saved setup for this series: ${ruleCount} schedule rule${ruleCount === 1 ? '' : 's'}, ${exceptionCount} exception${exceptionCount === 1 ? '' : 's'}, ${discardCount} discard rule${discardCount === 1 ? '' : 's'}.`);
+  renderChecklist(seriesName, summaryRules, summaryScoringRules);
 
-  renderRaces((racesData.races||[]));
+  const races = racesData.races || [];
+  renderRaces(races);
+  updateSummaryHighlights(seriesName, summaryRules, summaryScoringRules, races);
   setDefaultGenerateDates(rulesData.rules||[]);
 }
 
@@ -139,22 +263,64 @@ function renderRaces(races){
 }
 
 async function generate(){
-  const payload={ from_date: document.getElementById('genFromDate').value, to_date: document.getElementById('genToDate').value };
-  const res=await fetch(`/api/series/manage/${selectedSeriesId}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  const data=await res.json().catch(()=>({}));
-  if(!res.ok||!data.ok){ alert(data.error||'Failed to generate races'); return; }
-  document.getElementById('generateStatus').textContent=`Inserted ${data.inserted_count}, skipped ${data.skipped_count}, planned ${data.planned_count}`;
-  const racesRes=await fetch(`/api/series/manage/${selectedSeriesId}/races`,{cache:'no-store'});
-  const racesData=await racesRes.json().catch(()=>({}));
-  if(racesRes.ok&&racesData.ok) renderRaces(racesData.races||[]);
+  const generateBtn = document.getElementById('generateBtn');
+  const fromDate = document.getElementById('genFromDate').value;
+  const toDate = document.getElementById('genToDate').value;
+  if (!summaryRules.length) {
+    document.getElementById('generateStatus').textContent = 'Add at least one schedule rule before generating races.';
+    setGenerateBanner('error', 'Add at least one schedule rule before generating races.');
+    return;
+  }
+  if (!fromDate || !toDate) {
+    document.getElementById('generateStatus').textContent = 'Choose both a from and to date.';
+    setGenerateBanner('error', 'Choose both a from and to date before generating races.');
+    return;
+  }
+  if (fromDate > toDate) {
+    document.getElementById('generateStatus').textContent = 'The date range is invalid.';
+    setGenerateBanner('error', 'The “from” date must be on or before the “to” date.');
+    return;
+  }
+  const payload={ from_date: fromDate, to_date: toDate };
+  try {
+    generateBtn.disabled = true;
+    generateBtn.textContent = 'Generating...';
+    document.getElementById('generateStatus').textContent = 'Planning races...';
+    setGenerateBanner('info', `Generating races from ${fromDate} to ${toDate}.`);
+    const res=await fetch(`/api/series/manage/${selectedSeriesId}/generate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok||!data.ok){
+      document.getElementById('generateStatus').textContent = data.error||'Failed to generate races';
+      setGenerateBanner('error', data.error || 'Race generation failed. Check the selected range and saved schedule rules.');
+      return;
+    }
+    document.getElementById('generateStatus').textContent=`Inserted ${data.inserted_count}, skipped ${data.skipped_count}, planned ${data.planned_count}`;
+    const racesRes=await fetch(`/api/series/manage/${selectedSeriesId}/races`,{cache:'no-store'});
+    const racesData=await racesRes.json().catch(()=>({}));
+    if(racesRes.ok&&racesData.ok) {
+      const races = racesData.races || [];
+      renderRaces(races);
+      updateSummaryHighlights(document.getElementById('seriesHeader').textContent, summaryRules, summaryScoringRules, races);
+      setGenerateBanner('success', `Generated ${data.inserted_count} new race${data.inserted_count === 1 ? '' : 's'}, skipped ${data.skipped_count}, with ${races.length} total now scheduled.`);
+    }
+  } catch (e) {
+    document.getElementById('generateStatus').textContent = e.message || 'Failed to generate races';
+    setGenerateBanner('error', e.message || 'Failed to generate races.');
+  } finally {
+    generateBtn.disabled = !summaryRules.length;
+    generateBtn.textContent = 'Generate Races';
+  }
 }
 
 (async function init(){
   selectedSeriesId=getSeriesId();
   if(!selectedSeriesId){ window.location.href='/series/new/name'; return; }
   document.getElementById('backBtn').addEventListener('click',()=>window.location.href=`/series/new/scoring?series_id=${selectedSeriesId}`);
+  document.getElementById('editScheduleLink').addEventListener('click',(e)=>{ e.preventDefault(); window.location.href=`/series/new/schedule?series_id=${selectedSeriesId}`; });
+  document.getElementById('editExceptionsLink').addEventListener('click',(e)=>{ e.preventDefault(); window.location.href=`/series/new/schedule?series_id=${selectedSeriesId}`; });
+  document.getElementById('editScoringLink').addEventListener('click',(e)=>{ e.preventDefault(); window.location.href=`/series/new/scoring?series_id=${selectedSeriesId}`; });
   document.getElementById('generateBtn').addEventListener('click',generate);
-  try { await loadAll(); } catch(e){ alert(e.message||'Failed to load summary'); }
+  try { await loadAll(); } catch(e){ document.getElementById('generateStatus').textContent = e.message||'Failed to load summary'; }
 })();
 </script>
 </body>

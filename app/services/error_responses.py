@@ -1,8 +1,11 @@
-from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 
 
 def is_db_disconnect_error(exc):
-    if isinstance(exc, (OperationalError, DBAPIError)):
+    if isinstance(exc, (OperationalError, InterfaceError)):
+        return True
+
+    if isinstance(exc, DBAPIError) and getattr(exc, "connection_invalidated", False):
         return True
 
     message = str(exc).lower()

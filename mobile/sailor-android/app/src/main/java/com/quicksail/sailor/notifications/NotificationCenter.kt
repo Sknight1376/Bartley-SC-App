@@ -1,6 +1,7 @@
 ﻿package com.quicksail.sailor.notifications
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -14,11 +15,18 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.quicksail.sailor.MainActivity
 import com.quicksail.sailor.R
 import com.quicksail.sailor.api.DashboardLatestResult
+import com.quicksail.sailor.api.SailorDuty
 import com.quicksail.sailor.api.SeriesStandingRow
 import com.quicksail.sailor.api.UpcomingRace
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 object NotificationCenter {
 	private const val CHANNEL_ID = "race_updates"
@@ -35,6 +43,8 @@ object NotificationCenter {
 	private const val KEY_NOTIFY_UPCOMING_ENABLED = "notify_upcoming_enabled"
 	private const val KEY_NOTIFY_RESULTS_ENABLED = "notify_results_enabled"
 	private const val KEY_NOTIFY_SERIES_ENABLED = "notify_series_enabled"
+	private const val KEY_NOTIFY_DUTY_ENABLED = "notify_duty_enabled"
+	private const val KEY_DUTY_JSON = "duty_json"
 
 	private lateinit var appContext: Context
 	private lateinit var prefs: SharedPreferences
@@ -88,6 +98,138 @@ object NotificationCenter {
 		prefs.edit().putBoolean(KEY_NOTIFY_SERIES_ENABLED, enabled).apply()
 	}
 
+	fun isDutyEnabled(): Boolean = initialized && prefs.getBoolean(KEY_NOTIFY_DUTY_ENABLED, true)
+
+	fun setDutyEnabled(enabled: Boolean) {
+		if (!initialized) return
+		prefs.edit().putBoolean(KEY_NOTIFY_DUTY_ENABLED, enabled).apply()
+		if (enabled) {
+			rescheduleDutyAlarmsFromStorage(appContext)
+		} else {
+			cancelDutyAlarms(appContext, loadStoredDuties())
+		}
+	}
+
+	fun scheduleDutyNotifications(context: Context, duties: List<SailorDuty>) {
+		if (!initialized) return
+		val existing = loadStoredDuties()
+		cancelDutyAlarms(context, existing)
+		prefs.edit().putString(KEY_DUTY_JSON, Gson().toJson(duties)).apply()
+		if (!isDutyEnabled()) return
+		scheduleAlarmsForDuties(context, duties)
+	}
+
+	/** Convenience overload for callers that don't hold a Context (e.g. ViewModel). */
+	fun scheduleDutyNotifications(duties: List<SailorDuty>) {
+		if (!initialized) return
+		scheduleDutyNotifications(appContext, duties)
+	}
+
+	fun rescheduleDutyAlarmsFromStorage(context: Context) {
+		if (!initialized) init(context)
+		if (!isDutyEnabled()) return
+		scheduleAlarmsForDuties(context, loadStoredDuties())
+	}
+
+	fun postDutyNotification(context: Context, notifId: Int, title: String, text: String) {
+		if (!initialized) init(context)
+		if (!isDutyEnabled()) return
+		notify(notifId, title, text)
+	}
+
+	private fun loadStoredDuties(): List<SailorDuty> {
+		val json = prefs.getString(KEY_DUTY_JSON, null) ?: return emptyList()
+		return try {
+			val type = object : TypeToken<List<SailorDuty>>() {}.type
+			Gson().fromJson(json, type) ?: emptyList()
+		} catch (e: Exception) {
+			emptyList()
+		}
+	}
+
+	private fun scheduleAlarmsForDuties(context: Context, duties: List<SailorDuty>) {
+		val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+		val now = System.currentTimeMillis()
+		val dayFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
+		val timeFmt = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+
+		for (duty in duties) {
+			val raceDateStr = duty.race_date ?: continue
+			val raceDateTime = try {
+				LocalDateTime.parse(raceDateStr.take(19))
+			} catch (e: Exception) {
+				continue
+			}
+			val raceEpoch = raceDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+			val raceLabel = "Race #${duty.race_no ?: "?"}"
+			val clubLabel = duty.club_name ?: "Race"
+
+			// 5-day alarm: 9:00 AM on the day 5 days before the race
+			val fiveDayTrigger = raceDateTime
+				.minusDays(5)
+				.withHour(9).withMinute(0).withSecond(0).withNano(0)
+				.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+			if (fiveDayTrigger > now) {
+				scheduleAlarm(
+					context, alarmManager, fiveDayTrigger,
+					notifId = alarmNotifId(duty.race_id, 0),
+					title = "Duty in 5 days",
+					text = "$raceLabel at $clubLabel on ${raceDateTime.format(dayFmt)}"
+				)
+			}
+
+			// 24h alarm: 24 hours before race start
+			val oneDayTrigger = raceEpoch - 24 * 60 * 60 * 1000L
+			if (oneDayTrigger > now) {
+				scheduleAlarm(
+					context, alarmManager, oneDayTrigger,
+					notifId = alarmNotifId(duty.race_id, 1),
+					title = "Duty tomorrow",
+					text = "$raceLabel at $clubLabel at ${raceDateTime.format(timeFmt)}"
+				)
+			}
+		}
+	}
+
+	private fun scheduleAlarm(
+		context: Context,
+		alarmManager: AlarmManager,
+		triggerAtMillis: Long,
+		notifId: Int,
+		title: String,
+		text: String
+	) {
+		val intent = Intent(context, DutyAlarmReceiver::class.java).apply {
+			action = DutyAlarmReceiver.ACTION_DUTY_ALARM
+			putExtra(DutyAlarmReceiver.EXTRA_TITLE, title)
+			putExtra(DutyAlarmReceiver.EXTRA_TEXT, text)
+			putExtra(DutyAlarmReceiver.EXTRA_NOTIF_ID, notifId)
+		}
+		val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+		val pi = PendingIntent.getBroadcast(context, notifId, intent, flags)
+		alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
+	}
+
+	private fun cancelDutyAlarms(context: Context, duties: List<SailorDuty>) {
+		val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+		for (duty in duties) {
+			for (offset in 0..1) {
+				val notifId = alarmNotifId(duty.race_id, offset)
+				val intent = Intent(context, DutyAlarmReceiver::class.java).apply {
+					action = DutyAlarmReceiver.ACTION_DUTY_ALARM
+				}
+				val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+				val pi = PendingIntent.getBroadcast(context, notifId, intent, flags)
+				alarmManager.cancel(pi)
+			}
+		}
+	}
+
+	private fun alarmNotifId(raceId: Long, offset: Int): Int {
+		// Lower 15 bits of raceId, shifted left 1, OR offset → unique IDs 0..65535
+		return ((raceId and 0x7FFFL).toInt() shl 1) or offset
+	}
+
 	fun sendTestUpcomingNotification() {
 		if (!initialized || !isUpcomingEnabled()) return
 		notify(
@@ -115,10 +257,20 @@ object NotificationCenter {
 		)
 	}
 
+	fun sendTestDutyNotification() {
+		if (!initialized || !isDutyEnabled()) return
+		notify(
+			id = 8104,
+			title = "Test: Duty reminder",
+			text = "You have a duty in 5 days: Race #4 at Bartley SC"
+		)
+	}
+
 	fun sendAllTestNotifications() {
 		sendTestUpcomingNotification()
 		sendTestResultNotification()
 		sendTestSeriesEndNotification()
+		sendTestDutyNotification()
 	}
 
 	fun onSeriesStandingsUpdated(

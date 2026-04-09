@@ -56,6 +56,9 @@ interface ApiService {
     @GET("api/mobile/series/standings")
     suspend fun seriesStandings(): SeriesStandingsResponse
 
+    @GET("api/mobile/duties")
+    suspend fun duties(): DutiesResponse
+
     @GET("api/mobile/races/control/upcoming")
     suspend fun controlUpcomingRaces(): RaceControlRacesResponse
 

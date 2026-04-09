@@ -47,7 +47,7 @@ def dashboard_sailors_boats(db, club_id):
             if sid not in sailors_by_id:
                 full_name = row.get("fullname") or ""
                 if not full_name.strip():
-                    full_name = f"{row.get('firstname') or ''} {row.get('surname') or ''}".strip()
+                    full_name = f"Sailor #{sid}"
                 sailors_by_id[sid] = {
                     "sailor_id": sid,
                     "name": full_name,

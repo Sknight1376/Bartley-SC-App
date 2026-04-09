@@ -36,6 +36,7 @@ STATEMENTS = [
         valid_to TIMESTAMP NULL,
         granted_by BIGINT NULL REFERENCES "RACINGAPP"."CLUBUSER"(key),
         grant_reason TEXT NULL,
+        granted_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
         is_active BOOLEAN NOT NULL DEFAULT TRUE
     )
     ''',

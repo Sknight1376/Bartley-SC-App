@@ -16,6 +16,7 @@ import com.quicksail.sailor.api.DashboardSeriesPosition
 import com.quicksail.sailor.api.RaceSummaryRaceInfo
 import com.quicksail.sailor.api.RaceSummaryResultRow
 import com.quicksail.sailor.api.SailorBoat
+import com.quicksail.sailor.api.SailorDuty
 import com.quicksail.sailor.api.SailorProfile
 import com.quicksail.sailor.api.SeriesStandingRow
 import com.quicksail.sailor.api.SeriesSummary
@@ -69,7 +70,8 @@ data class SailorUiState(
     val pendingActionsCount: Int = 0,
     val restoredHomePage: String = "DASHBOARD",
     val restoredScroll: Int = 0,
-    val sessionRestoreChecked: Boolean = false
+    val sessionRestoreChecked: Boolean = false,
+    val duties: List<SailorDuty> = emptyList()
 )
 
 class SailorViewModel : ViewModel() {
@@ -170,6 +172,7 @@ class SailorViewModel : ViewModel() {
             loadControlRaces()
             loadDashboard()
             loadClubSeriesStandings()
+            loadDuties()
             return@launch
         }
 
@@ -213,6 +216,7 @@ class SailorViewModel : ViewModel() {
                     loadControlRaces()
                     loadDashboard()
                     loadClubSeriesStandings()
+                    loadDuties()
                 } else {
                     _state.value = _state.value.copy(loading = false, error = it.error ?: "Login failed")
                 }
@@ -247,6 +251,7 @@ class SailorViewModel : ViewModel() {
                     loadControlRaces()
                     loadDashboard()
                     loadClubSeriesStandings()
+                    loadDuties()
                 } else {
                     _state.value = _state.value.copy(loading = false, error = it.error ?: "Registration failed")
                 }
@@ -598,6 +603,17 @@ class SailorViewModel : ViewModel() {
                     controlError = safeNetworkMessage("Unable to load race-control access", it)
                 )
             }
+    }
+
+    fun loadDuties() = viewModelScope.launch {
+        runCatching { Network.api.duties() }
+            .onSuccess {
+                if (it.ok) {
+                    _state.value = _state.value.copy(duties = it.duties)
+                    NotificationCenter.scheduleDutyNotifications(it.duties)
+                }
+            }
+            // Silently ignore failures — duty alarms already scheduled from stored prefs
     }
 
     fun selectControlRace(raceId: Long?) {

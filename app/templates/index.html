@@ -1,86 +1,101 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Race Entry Setup</title>
   <script src="static/js/jquery-3.6.3.min.js"></script>
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
 </head>
+<body class="landing-page">
+  <header class="banner" role="banner">
+    <h1 class="sr-only">Race Entry Setup</h1>
+  </header>
 
+  <main class="page-shell">
+    <div class="form-border" aria-labelledby="entrySetupHeading">
+      <h2 id="entrySetupHeading" class="lettering">Set up race entries</h2>
 
-<section class="banner">
-</section>
+      <div class="entry-banner" aria-label="Progress steps">
+        <div class="entry-step entry-step-active" aria-current="step">1. Entry</div>
+        <div class="entry-step">2. Sailor</div>
+        <div class="entry-step">3. Summary</div>
+      </div>
 
-  <br>
+      <div id="formStatus" class="status-banner" role="status" aria-live="polite" hidden></div>
 
-<div class = "form-border">
-    <div class = "entry-banner">
-    <div style="background-color: #A9ADFC; border-top-right-radius: 120px; border-bottom-right-radius: 120px; color: #ffffff; text-align: center; line-height: 40px;">1. Entry</div>
-    <div style="color: #979797; text-align: center; line-height: 40px;">2. Sailor</div>
-    <div style="color: #979797; text-align: center; line-height: 40px;">3. Summary</div>
+      <form class="club" novalidate>
+        <label for="clubName">Club</label>
+        <input type="text" id="clubName" list="clubNameList" autocomplete="off" required>
+        <datalist id="clubNameList"></datalist>
+
+        <label for="seriesName">Series</label>
+        <input type="text" id="seriesName" required>
+      </form>
+
+      <form class="competitors" novalidate>
+        <label for="Boat">Boat</label>
+        <select id="Boat" required></select>
+
+        <label for="sailNo">Sail Number</label>
+        <input type="text" id="sailNo" required>
+      </form>
     </div>
-    <br>
 
-  <form class="club">
+    <div class="action-row">
+      <button type="button" id="addEntry" class="orange-button">Add Entry</button>
+      <button type="button" id="goRace" class="green-button">Go to Race</button>
+    </div>
 
-    <label for="clubName">Club</label>
-    <input type="text" id="clubName" list="clubNameList" autocomplete="off">
-    <datalist id="clubNameList"></datalist>
-
-
-    <label for="seriesName">Series</label>
-    <input type="text" id="seriesName">
-
-  </form>
-
-  <br>
-
-  <form class="competitors">
-    <label for="Boat">Boat</label>
-    <select id="Boat"></select>
-
-    <label for="sailNo">Sail Number</label>
-    <input type="text" id="sailNo">
-  </form>
-  </div>
-
-  <br>
-
-  <button type="button" id="addEntry" class="orange-button">Add Entry</button>
-  <button type="button" id="goRace" class="green-button">Go to Race</button>
-
-  <br><br>
-
-  <table id="setupEntries" class="tables">
-    <thead>
-      <tr>
-        <th>Boat</th>
-        <th>Sail Number</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+    <div class="table-wrap">
+      <table id="setupEntries" class="tables" aria-describedby="entriesHelp">
+        <caption id="entriesHelp" class="sr-only">Current race entries list</caption>
+        <thead>
+          <tr>
+            <th scope="col">Boat</th>
+            <th scope="col">Sail Number</th>
+            <th scope="col">Action</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
 
   <script>
-    // Populate boats from Flask
     const boats = {{ boatarray | tojson }};
     const boatSelect = document.getElementById("Boat");
+    const statusNode = document.getElementById("formStatus");
     boatSelect.add(new Option("-- Select a boat --", ""));
     for (const [name, id] of boats) {
       boatSelect.add(new Option(name, id));
     }
 
-    // Entries list held in memory
     const entries = [];
+
+    function setStatus(message, type = "info") {
+      statusNode.textContent = message;
+      statusNode.className = `status-banner status-${type}`;
+      statusNode.hidden = !message;
+    }
 
     function renderEntries() {
       const tbody = document.querySelector("#setupEntries tbody");
       tbody.innerHTML = "";
+
+      if (!entries.length) {
+        const emptyRow = document.createElement("tr");
+        emptyRow.innerHTML = `<td colspan="3" class="empty-table">No entries added yet.</td>`;
+        tbody.appendChild(emptyRow);
+        return;
+      }
+
       entries.forEach((e, idx) => {
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${e.boatName}</td>
           <td>${e.sailNo}</td>
-          <td><button type="button" data-idx="${idx}">Remove</button></td>
+          <td><button type="button" class="red-button remove-entry" data-idx="${idx}">Remove</button></td>
         `;
         tbody.appendChild(tr);
       });
@@ -89,9 +104,42 @@
         btn.addEventListener("click", () => {
           const i = Number(btn.getAttribute("data-idx"));
           entries.splice(i, 1);
+          setStatus("Entry removed.", "info");
           renderEntries();
         });
       });
+    }
+
+    async function loadClubs() {
+      const res = await fetch("/api/clubs");
+      if (!res.ok) {
+        setStatus("Unable to load clubs right now.", "error");
+        return;
+      }
+      const data = await res.json();
+      const list = document.getElementById("clubNameList");
+      list.innerHTML = "";
+      (data.clubs || []).forEach(name => {
+        const opt = document.createElement("option");
+        opt.value = name;
+        list.appendChild(opt);
+      });
+    }
+
+    function isValidSetup(clubName, seriesName) {
+      if (!clubName) {
+        setStatus("Please enter a club name.", "error");
+        return false;
+      }
+      if (!seriesName) {
+        setStatus("Please enter a series name.", "error");
+        return false;
+      }
+      if (!entries.length) {
+        setStatus("Add at least one entry before continuing.", "error");
+        return false;
+      }
+      return true;
     }
 
     document.getElementById("addEntry").addEventListener("click", () => {
@@ -99,10 +147,17 @@
       const boatName = boatSelect.options[boatSelect.selectedIndex]?.text;
       const sailNo = document.getElementById("sailNo").value.trim();
 
-      if (!boatId) return alert("Select a boat.");
-      if (!sailNo) return alert("Enter a sail number.");
+      if (!boatId) {
+        setStatus("Select a boat.", "error");
+        return;
+      }
+      if (!sailNo) {
+        setStatus("Enter a sail number.", "error");
+        return;
+      }
 
       entries.push({ boatId: Number(boatId), boatName, sailNo });
+      setStatus("Entry added.", "success");
       renderEntries();
       document.getElementById("sailNo").value = "";
     });
@@ -110,105 +165,26 @@
     document.getElementById("goRace").addEventListener("click", () => {
       const clubName = document.getElementById("clubName").value.trim();
       const seriesName = document.getElementById("seriesName").value.trim();
-      const raceNo = document.getElementById("raceNo").value.trim();
 
-      if (!clubName || !seriesName || !raceNo) {
-        return alert("Please enter Club, Series and Race Number.");
-      }
-      if (entries.length === 0) {
-        return alert("Add at least one entry.");
-      }
+      if (!isValidSetup(clubName, seriesName)) return;
 
       sessionStorage.setItem("clubName", clubName);
       sessionStorage.setItem("seriesName", seriesName);
-      sessionStorage.setItem("raceNo", raceNo);
       sessionStorage.setItem("entries", JSON.stringify(entries));
 
       window.location.href = "/race";
     });
 
-    // Prevent Enter submitting forms
     $(function(){
       $(':text').on('keydown', function(e){
         if(e.keyCode === 13) e.preventDefault();
       });
     });
-  </script>
 
-  
-<script>
-async function loadClubs() {
-  const res = await fetch("/api/clubs");
-  if (!res.ok) {
-    console.error("Failed to load clubs");
-    return;
-  }
-  const data = await res.json();
-  const list = document.getElementById("clubNameList");
-  list.innerHTML = "";
-  (data.clubs || []).forEach(name => {
-    const opt = document.createElement("option");
-    opt.value = name;
-    list.appendChild(opt);
-  });
-}
-
-async function ensureClubExists(clubName) {
-  const res = await fetch("/api/clubs", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ club_name: clubName })
-  });
-
-  if (!res.ok) {
-    const msg = await res.text();
-    throw new Error(msg);
-  }
-  return await res.json(); // { key, club_name, created }
-}
-
-document.addEventListener("DOMContentLoaded", () => {
-  loadClubs();
-
-  // Optional: when the user leaves the club field, auto-insert if new
-  const clubInput = document.getElementById("clubName");
-  clubInput.addEventListener("blur", async () => {
-    const value = clubInput.value.trim();
-    if (!value) return;
-
-    try {
-      await ensureClubExists(value);
-      await loadClubs(); // refresh list so it appears next time
-    } catch (e) {
-      console.error(e);
-      alert("Could not save club. See console for details.");
-    }
-  });
-
-  // If you have a "Go to race" button, ensure club exists before navigating
-  const goRaceBtn = document.getElementById("goRace");
-  if (goRaceBtn) {
-    goRaceBtn.addEventListener("click", async () => {
-      const value = clubInput.value.trim();
-      if (!value) {
-        alert("Please enter a club name.");
-        return;
-      }
-      try {
-        const club = await ensureClubExists(value);
-        // store the numeric ID for backend references if you want:
-        sessionStorage.setItem("clubId", club.key);
-        sessionStorage.setItem("clubName", club.club_name);
-
-        // ... proceed with your existing navigation logic ...
-      } catch (e) {
-        console.error(e);
-        alert("Could not save club. See console for details.");
-      }
+    document.addEventListener("DOMContentLoaded", () => {
+      loadClubs();
+      renderEntries();
     });
-  }
-});
-</script>
-
+  </script>
 </body>
 </html>

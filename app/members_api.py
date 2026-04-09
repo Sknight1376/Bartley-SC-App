@@ -7,6 +7,12 @@ from services.members_repository import (
     member_exists,
     update_member,
 )
+from services.members_repository import (
+    confirm_app_registration,
+    delete_orphaned_sailor,
+    get_app_registrations,
+    link_app_user_to_member,
+)
 
 
 def members_list(db, club_id):
@@ -28,6 +34,12 @@ def members_list(db, club_id):
                     "last_name": row["lastname"],
                     "boats": [],
                 }
+                members[sid]["sailor_user_id"] = row["sailor_user_id"]
+                members[sid]["app_username"] = row["app_username"]
+                members[sid]["app_is_active"] = row["app_is_active"]
+                members[sid]["app_last_login"] = (
+                    row["app_last_login"].isoformat() if row["app_last_login"] else None
+                )
             if row["boat_key"] is not None:
                 members[sid]["boats"].append(
                     {
@@ -112,5 +124,62 @@ def members_assign_boat(db, member_id, club_id, payload):
             boat_key = insert_member_boat(conn, handicap_key, member_id, sail_number)
 
         return {"ok": True, "boat_key": boat_key}, 200
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 500
+
+
+def members_app_registrations(db, club_id):
+    if not club_id:
+        return {"ok": False, "error": "Unauthorized"}, 401
+    try:
+        with db.engine.connect() as conn:
+            rows = get_app_registrations(conn, club_id)
+        result = [
+            {
+                "sailor_id": r["sailor_id"],
+                "full_name": r["fullname"],
+                "first_name": r["firstname"],
+                "last_name": r["lastname"],
+                "sailor_user_id": r["sailor_user_id"],
+                "app_username": r["app_username"],
+                "registered_at": r["registered_at"].isoformat() if r["registered_at"] else None,
+            }
+            for r in rows
+        ]
+        return {"ok": True, "registrations": result}, 200
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 500
+
+
+def members_confirm_app_user(db, sailor_user_id, club_id):
+    if not club_id:
+        return {"ok": False, "error": "Unauthorized"}, 401
+    try:
+        with db.engine.begin() as conn:
+            result = confirm_app_registration(conn, sailor_user_id, club_id)
+        if result.rowcount == 0:
+            return {"ok": False, "error": "Registration not found or already confirmed"}, 404
+        return {"ok": True}, 200
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 500
+
+
+def members_link_app_user(db, sailor_user_id, club_id, payload):
+    if not club_id:
+        return {"ok": False, "error": "Unauthorized"}, 401
+    target_sailor_id = payload.get("target_sailor_id")
+    if not target_sailor_id:
+        return {"ok": False, "error": "target_sailor_id is required"}, 400
+    try:
+        with db.engine.begin() as conn:
+            old_sailor_id = link_app_user_to_member(conn, sailor_user_id, int(target_sailor_id), club_id)
+            if old_sailor_id and int(old_sailor_id) != int(target_sailor_id):
+                try:
+                    delete_orphaned_sailor(conn, old_sailor_id, club_id)
+                except ValueError:
+                    pass  # old sailor has boats or other data – leave it, admin can tidy up
+        return {"ok": True}, 200
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}, 400
     except Exception as e:
         return {"ok": False, "error": str(e)}, 500

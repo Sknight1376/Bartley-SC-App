@@ -85,10 +85,24 @@ def list_series_manage_rows(conn, club_id):
             SELECT s.key,
                    s.year,
                    s.name,
+                   COALESCE(sr.rule_count, 0) AS rule_count,
+                   COALESCE(ss.discard_rule_count, 0) AS discard_rule_count,
                    COALESCE(r.total_races, 0) AS total_races,
                    r.next_race_at,
                    r.last_race_at
             FROM "RACINGAPP"."SERIESCONTROL" s
+            LEFT JOIN (
+                SELECT series,
+                       COUNT(*) FILTER (WHERE COALESCE(is_active, TRUE)) AS rule_count
+                FROM "RACINGAPP"."SERIES_RULE"
+                GROUP BY series
+            ) sr ON sr.series = s.key
+            LEFT JOIN (
+                SELECT series,
+                       COUNT(*) AS discard_rule_count
+                FROM "RACINGAPP"."SERIES_SCORING_DISCARD"
+                GROUP BY series
+            ) ss ON ss.series = s.key
             LEFT JOIN (
                 SELECT series,
                        COUNT(*) AS total_races,

@@ -4,10 +4,9 @@
   <script src="static/js/jquery-3.6.3.min.js"></script>
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
 </head>
-<body>
-
-<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
-<section class="banner"></section>
+<body data-club-id="{{ clubId }}">
+{% set active_nav = 'home' %}
+{% include 'partials/app_header.html' %}
 <br>
 
 <div class="form-border" style="text-align:center;">
@@ -30,22 +29,18 @@
   </div>
 </section>
 
-<div class="form-footer" style="display:flex; gap:20px; justify-content:center;">
-  <button id="newRaceBtn" class="blue-button" style="left: 0; right: auto;">Start New Race</button>
-  <button id="dashboardBtn" class="blue-button" style="left: 33%; right: auto;">Club Dashboard</button>
-  <!-- <button id="testRaceBtn" class="blue-button" style="left: 25%; transform: translateX(-50%);">Open Test Race</button> -->
-  <button id="logoutBtn" class="blue-button">Logout</button>
-</div>
+<section class="next-race-shell" aria-label="Next race">
+  <div class="next-race-card">
+    <h3 style="margin:0 0 10px; color:#1331C5;">Next Race</h3>
+    <div id="nextRacePanel" style="color:#6b7280;">Loading next race...</div>
+    <div class="next-race-actions">
+      <button type="button" id="startNextRaceBtn" class="blue-button" style="position:static;" disabled>Start This Race</button>
+      <a href="/club_entry" class="next-race-link">Choose a different race</a>
+    </div>
+  </div>
+</section>
 
 <script>
-document.getElementById('newRaceBtn').addEventListener('click', () => {
-  window.location.href = '/club_entry';
-});
-
-document.getElementById('dashboardBtn').addEventListener('click', () => {
-  window.location.href = '/club_dashboard';
-});
-
 function esc(v) {
   return String(v ?? '')
     .replace(/&/g, '&amp;')
@@ -60,6 +55,95 @@ function formatDateTime(raw) {
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return esc(raw);
   return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+}
+
+const landingClubId = document.body.dataset.clubId;
+let nextRace = null;
+
+async function loadNextRacePanel() {
+  const panel = document.getElementById('nextRacePanel');
+  const startBtn = document.getElementById('startNextRaceBtn');
+
+  startBtn.disabled = true;
+  nextRace = null;
+
+  try {
+    const res = await fetch(`/api/races/upcoming/${encodeURIComponent(landingClubId)}`, { cache: 'no-store' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'Unable to load upcoming races.');
+    }
+
+    const races = data.races || [];
+    if (!races.length) {
+      panel.innerHTML = '<div>No upcoming races found for active series.</div>';
+      return;
+    }
+
+    const first = races[0];
+    const raceId = first.race_id;
+    let entryCount = '—';
+    if (raceId) {
+      const entriesRes = await fetch(`/api/races/${raceId}/entries`, { cache: 'no-store' });
+      const entriesData = await entriesRes.json().catch(() => ({}));
+      if (entriesRes.ok && entriesData.ok) {
+        entryCount = String((entriesData.entries || []).length);
+      }
+    }
+
+    nextRace = {
+      club_id: landingClubId,
+      series_id: first.series_id,
+      race_id: first.race_id,
+      series_name: first.series_name,
+      race_no: first.race_no,
+      started_at: first.started_at
+    };
+
+    panel.innerHTML = `
+      <div class="next-race-grid">
+        <div><span class="k">Series</span><span class="v">${esc(first.series_name || '—')}</span></div>
+        <div><span class="k">Race</span><span class="v">#${esc(first.race_no || '—')}</span></div>
+        <div><span class="k">Start time</span><span class="v">${formatDateTime(first.started_at) || 'Not set'}</span></div>
+        <div><span class="k">Entries</span><span class="v">${esc(entryCount)}</span></div>
+      </div>
+    `;
+    startBtn.disabled = false;
+  } catch (err) {
+    panel.textContent = err.message || 'Failed to load next race.';
+  }
+}
+
+async function startNextRaceFlow() {
+  if (!nextRace) return;
+  const startBtn = document.getElementById('startNextRaceBtn');
+  startBtn.disabled = true;
+
+  try {
+    const setRes = await fetch('/api/set_club_series', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        club_id: nextRace.club_id,
+        series_id: nextRace.series_id,
+        race_id: nextRace.race_id
+      })
+    });
+    const payload = await setRes.json().catch(() => ({}));
+    if (!setRes.ok || !payload.ok) {
+      throw new Error(payload.error || 'Could not initialize race flow.');
+    }
+
+    const params = new URLSearchParams();
+    params.append('clubName', String(nextRace.club_id));
+    params.append('seriesName', String(nextRace.series_id));
+    params.append('raceId', String(nextRace.race_id));
+    window.location.href = `/sailor_entry?${params.toString()}`;
+  } catch (err) {
+    startBtn.disabled = false;
+    const panel = document.getElementById('nextRacePanel');
+    panel.textContent = err.message || 'Unable to start selected race.';
+  }
 }
 
 async function loadLandingOverview() {
@@ -107,15 +191,10 @@ if (testRaceBtn) {
   });
 }
 
-document.getElementById('logoutBtn').addEventListener('click', async () => {
-  try {
-    await fetch('/api/logout', { method: 'POST' });
-  } catch (_) {}
-  sessionStorage.clear();
-  window.location.href = '/';
-});
+document.getElementById('startNextRaceBtn').addEventListener('click', startNextRaceFlow);
 
 loadLandingOverview();
+loadNextRacePanel();
 </script>
 </body>
 </html>

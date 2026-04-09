@@ -24,12 +24,43 @@ def get_assigned_race_ids(conn, club_id, sailor_id):
               AND rda.sailor = :sailor_id
               AND rda.status = 'assigned'
               AND rr.code = 'race_officer'
-              AND (rda.starts_at IS NULL OR rda.starts_at <= CURRENT_TIMESTAMP)
-              AND (rda.ends_at IS NULL OR rda.ends_at >= CURRENT_TIMESTAMP)
+              AND (
+                (
+                  (rda.starts_at IS NULL OR rda.starts_at <= CURRENT_TIMESTAMP)
+                  AND (rda.ends_at IS NULL OR rda.ends_at >= CURRENT_TIMESTAMP)
+                )
+                OR DATE(r.started_at) = CURRENT_DATE
+              )
         '''),
         {"club_id": club_id, "sailor_id": sailor_id}
     ).mappings().all()
     return [row["race_id"] for row in rows]
+
+
+def get_upcoming_sailor_duties(conn, sailor_id):
+    """Return upcoming duty assignments for a sailor (races today or in the future)."""
+    return conn.execute(
+        text('''
+            SELECT rda.race_id,
+                   rda.duty_type,
+                   rda.starts_at AS duty_starts_at,
+                   rda.ends_at   AS duty_ends_at,
+                   rda.status,
+                   r.started_at  AS race_date,
+                   r.race_no,
+                   cc.name       AS club_name,
+                   rr.code       AS role_code
+            FROM "RACINGAPP"."RACE_DUTY_ASSIGNMENT" rda
+            JOIN "RACINGAPP"."RACE" r ON r.key = rda.race_id
+            JOIN "RACINGAPP"."ROLE" rr ON rr.key = rda.role
+            JOIN "RACINGAPP"."CLUBCONTROL" cc ON cc.key = r.club
+            WHERE rda.sailor = :sailor_id
+              AND rda.status = 'assigned'
+              AND (r.started_at IS NULL OR r.started_at >= CURRENT_DATE)
+            ORDER BY r.started_at ASC NULLS LAST, r.key ASC
+        '''),
+        {"sailor_id": sailor_id}
+    ).mappings().all()
 
 
 # ---------------------------------------------------------------------------
@@ -94,8 +125,8 @@ def insert_sailor(conn, fullname, firstname, lastname, club):
 def insert_sailor_user(conn, sailor_id, username, password):
     return conn.execute(
         text('''
-            INSERT INTO "RACINGAPP"."SAILORUSER" (key, sailor, username, password_hash)
-            VALUES (nextval('key'), :sailor_id, :username, crypt(:password, gen_salt('bf')))
+            INSERT INTO "RACINGAPP"."SAILORUSER" (key, sailor, username, password_hash, is_active)
+            VALUES (nextval('key'), :sailor_id, :username, crypt(:password, gen_salt('bf')), FALSE)
             RETURNING key
         '''),
         {"sailor_id": sailor_id, "username": username, "password": password}

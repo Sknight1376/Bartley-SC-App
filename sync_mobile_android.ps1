@@ -2,7 +2,8 @@ param(
     [ValidateSet("ToWsl", "FromWsl")]
     [string]$Direction = "ToWsl",
     [string]$WslDistro = "Ubuntu",
-    [string]$WslProjectPath = "/home/sjknight/mobile/sailor-android"
+    [string]$WslUser = "sjknight",
+    [string]$WslProjectSubPath = "mobile\sailor-android"
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,37 +13,32 @@ if (!(Test-Path $repoProjectPath)) {
     throw "Repo mobile project not found: $repoProjectPath"
 }
 
-function Convert-ToWslPath([string]$path) {
-    $resolved = (Resolve-Path $path).Path
-    $normalized = $resolved -replace '\\', '/'
-    if ($normalized -match '^([A-Za-z]):/(.*)$') {
-        $drive = $matches[1].ToLower()
-        $rest = $matches[2]
-        return "/mnt/$drive/$rest"
-    }
-    throw "Unable to convert path to WSL format: $path"
+# Access the WSL filesystem directly via the Windows \\wsl.localhost\ UNC path.
+# This avoids any /mnt/drive conversion which breaks for network-share (UNC) project paths.
+$wslWindowsPath = "\\wsl.localhost\$WslDistro\home\$WslUser\$WslProjectSubPath"
+
+if ($Direction -eq "ToWsl") {
+    $source = $repoProjectPath
+    $target = $wslWindowsPath
+} else {
+    $source = $wslWindowsPath
+    $target = $repoProjectPath
 }
 
-$repoWslPath = Convert-ToWslPath $repoProjectPath
-$sourcePath = if ($Direction -eq "ToWsl") { $repoWslPath } else { $WslProjectPath }
-$targetPath = if ($Direction -eq "ToWsl") { $WslProjectPath } else { $repoWslPath }
-
-$rsyncCommand = @"
-mkdir -p '$targetPath'
-rsync -a --delete \
-  --exclude '.git/' \
-  --exclude '.gradle/' \
-  --exclude '.idea/' \
-  --exclude 'build/' \
-  --exclude '**/build/' \
-  --exclude 'local.properties' \
-  --exclude '*.iml' \
-  '$sourcePath/' '$targetPath/'
-"@
-
 Write-Host "Syncing mobile project $Direction ..." -ForegroundColor Cyan
-wsl -d $WslDistro bash -lc $rsyncCommand
+Write-Host "  Source: $source"
+Write-Host "  Target: $target"
+
+if (!(Test-Path $target)) {
+    New-Item -ItemType Directory -Path $target -Force | Out-Null
+}
+
+$null = robocopy $source $target /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP `
+    /XD ".git" ".gradle" ".idea" "build" `
+    /XF "*.iml" "local.properties"
+$robocopyCode = $LASTEXITCODE
+if ($robocopyCode -ge 8) {
+    throw "robocopy failed with exit code $robocopyCode"
+}
 
 Write-Host "Sync complete." -ForegroundColor Green
-Write-Host "Source: $sourcePath"
-Write-Host "Target: $targetPath"

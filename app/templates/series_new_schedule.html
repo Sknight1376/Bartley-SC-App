@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
   <style>
-    .series-wrap { width: 1000px; margin: 20px auto; }
+    .series-wrap { width: min(1000px, calc(100% - 24px)); margin: 20px auto; }
     .series-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
     .row { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
     .field { flex:1; min-width:180px; }
@@ -18,20 +20,25 @@
     .mini-table th, .mini-table td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
     .muted { color:#666; font-size:12px; }
     .info-banner { margin: 0 0 10px; padding:10px 12px; border-radius:8px; background:#f7f8ff; border:1px solid #d7d9fd; color:#4250a6; font-size:13px; }
+    .preview-dates { margin: 10px 0 0; padding-left: 18px; text-align:left; font-size:13px; color:#334155; }
+    .preview-dates li { margin: 4px 0; }
+    @media (max-width: 900px) {
+      .split { grid-template-columns: 1fr; }
+      .sub-card { min-width: 0; }
+    }
   </style>
 </head>
 <body data-current-series-id="{{ currentSeriesId or '' }}">
-<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
-<section class="banner"></section>
-<br>
+{% set active_nav = 'dashboard' %}
+{% include 'partials/app_header.html' %}
 
 <div class="form-border">
   <div class="entry-banner">
-    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">1. Add New Series</div>
-    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">2. Series Name</div>
-    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color:#fff; text-align:center; line-height:40px;">3. Scheduling</div>
-    <div style="color:#979797; text-align:center; line-height:40px;">4. Scoring</div>
-    <div style="color:#979797; text-align:center; line-height:40px;">5. Summary</div>
+    <div class="entry-step entry-step-complete">1. Add New Series</div>
+    <div class="entry-step entry-step-complete">2. Series Name</div>
+    <div class="entry-step entry-step-active" style="border-top-right-radius: 120px; border-bottom-right-radius: 120px;">3. Scheduling</div>
+    <div class="entry-step">4. Scoring</div>
+    <div class="entry-step">5. Summary</div>
   </div>
   <br>
   <h4 style="color:#979797">Step Three</h4>
@@ -46,15 +53,27 @@
         <h4>Add Schedule Rule</h4>
         <div id="ruleEditState" class="info-banner">Add a new schedule rule, or edit an existing one from the list below.</div>
         <div class="row">
-          <div class="field" style="max-width:140px;"><label>Weekday</label><input id="ruleWeekday" class="small-input" value="saturday"></div>
+          <div class="field" style="max-width:140px;">
+            <label>Weekday</label>
+            <select id="ruleWeekday" class="small-input">
+              <option value="monday">Monday</option>
+              <option value="tuesday">Tuesday</option>
+              <option value="wednesday">Wednesday</option>
+              <option value="thursday">Thursday</option>
+              <option value="friday">Friday</option>
+              <option value="saturday" selected>Saturday</option>
+              <option value="sunday">Sunday</option>
+            </select>
+          </div>
           <div class="field" style="max-width:120px;"><label>Start Time</label><input id="ruleStartTime" class="small-input" value="11:00"></div>
-          <div class="field" style="max-width:120px;"><label>Cadence</label><input id="ruleCadence" class="small-input" type="number" min="1" value="1"></div>
-          <div class="field" style="max-width:120px;"><label>Races/Day</label><input id="ruleRacesPerDay" class="small-input" type="number" min="1" value="1"></div>
-          <div class="field" style="max-width:120px;"><label>Race Count</label><input id="ruleRaceCount" class="small-input" type="number" min="1" value="1"></div>
+          <div class="field" style="max-width:120px;"><label>Cadence (weeks)</label><input id="ruleCadence" class="small-input" type="number" min="1" value="1"></div>
+          <div class="field" style="max-width:120px;"><label>Races per Day</label><input id="ruleRacesPerDay" class="small-input" type="number" min="1" value="1"></div>
+          <div class="field" style="max-width:120px;"><label>Total Race Count</label><input id="ruleRaceCount" class="small-input" type="number" min="1" value="1"></div>
         </div>
         <div class="row">
           <div class="field"><label>Additional Start Times (HH:MM)</label><input id="ruleAdditionalTimes" class="small-input" placeholder="12:00,13:00"></div>
         </div>
+        <div class="muted" style="margin-top:2px;">If you run multiple races in one day, add the extra start times separated by commas.</div>
         <div class="row">
           <div class="field" style="max-width:180px;"><label>Start Date</label><input id="ruleValidFrom" class="small-input" type="date"></div>
           <div class="field" style="max-width:180px;"><label>End Date (auto)</label><input id="ruleValidTo" class="small-input" type="date" readonly></div>
@@ -62,6 +81,8 @@
           <button id="cancelRuleEditBtn" class="btn secondary" style="display:none;">Cancel Edit</button>
         </div>
         <div class="muted">For concurrent regatta days, add one rule per day.</div>
+        <div id="rulePreview" class="info-banner" style="margin-top:12px;">Preview your schedule pattern here.</div>
+        <ul id="rulePreviewDates" class="preview-dates"></ul>
 
         <div style="margin-top:10px; max-height:220px; overflow:auto;">
           <table class="mini-table">
@@ -93,7 +114,18 @@
 
 <div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
   <button class="blue-button" id="backBtn">Back</button>
-  <button class="blue-button" id="nextBtn">> Continue to Scoring</button>
+  <button class="blue-button" id="nextBtn">Continue to Scoring</button>
+</div>
+
+<div id="scheduleStatus" class="muted" style="text-align:center; margin-top:10px;"></div>
+<div id="scheduleSaveMeta" class="muted" style="text-align:center; margin-top:4px; color:#1331C5;"></div>
+
+<div id="scheduleConfirmStrip" class="confirm-strip">
+  <div id="scheduleConfirmMessage">Confirm action</div>
+  <div class="confirm-strip-actions">
+    <button id="scheduleConfirmOk" class="blue-button" style="position:static;">Confirm</button>
+    <button id="scheduleConfirmCancel" class="blue-button" style="position:static; background:#6b7280;">Cancel</button>
+  </div>
 </div>
 
 <script>
@@ -106,18 +138,48 @@ let loadedExceptions = [];
 let ruleFormDirty = false;
 let exceptionFormDirty = false;
 let _navigatingAway = false;
+const scheduleStatus = document.getElementById('scheduleStatus');
+const scheduleSaveMeta = document.getElementById('scheduleSaveMeta');
+const scheduleConfirmStrip = document.getElementById('scheduleConfirmStrip');
+const scheduleConfirmMessage = document.getElementById('scheduleConfirmMessage');
+let pendingConfirmAction = null;
 
-function markRuleDirty(){ ruleFormDirty = true; }
-function markExceptionDirty(){ exceptionFormDirty = true; }
+function formatSaveTime(){
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function refreshScheduleSaveMeta(){
+  scheduleSaveMeta.textContent = hasUnsavedSchedule() ? 'Unsaved changes' : (scheduleSaveMeta.dataset.savedAt ? `Saved at ${scheduleSaveMeta.dataset.savedAt}` : 'Loaded saved draft');
+}
+
+function markSavedState(){
+  scheduleSaveMeta.dataset.savedAt = formatSaveTime();
+  refreshScheduleSaveMeta();
+}
+
+function setStatus(message){
+  scheduleStatus.textContent = message || '';
+}
+
+function openConfirm(message, onConfirm){
+  pendingConfirmAction = onConfirm;
+  scheduleConfirmMessage.textContent = message;
+  scheduleConfirmStrip.classList.add('open');
+}
+
+function closeConfirm(){
+  pendingConfirmAction = null;
+  scheduleConfirmStrip.classList.remove('open');
+}
+
+function markRuleDirty(){ ruleFormDirty = true; refreshScheduleSaveMeta(); }
+function markExceptionDirty(){ exceptionFormDirty = true; refreshScheduleSaveMeta(); }
 
 function hasUnsavedSchedule(){ return ruleFormDirty || exceptionFormDirty; }
 
 function confirmLeaveIfDirty(){
   if(!hasUnsavedSchedule()) return true;
-  const what = [];
-  if(ruleFormDirty) what.push('schedule rule form');
-  if(exceptionFormDirty) what.push('exception form');
-  return confirm(`You have unsaved changes in the ${what.join(' and ')}. Leave without saving?`);
+  return false;
 }
 
 const _beforeUnloadHandler = (e)=>{
@@ -186,7 +248,9 @@ function resetRuleForm(){
   document.getElementById('ruleAdditionalTimes').value = '';
   document.getElementById('ruleValidTo').value = '';
   initDates();
+  updateRulePreview();
   setRuleButtonMode();
+  refreshScheduleSaveMeta();
   if(loadedRules.length){
     setRuleEditState('Add a new schedule rule, or click Edit on an existing rule below.');
   } else {
@@ -214,6 +278,7 @@ function resetExceptionForm(){
   document.getElementById('exDate').value = '';
   document.getElementById('exNote').value = '';
   setExceptionButtonMode();
+  refreshScheduleSaveMeta();
   if(loadedExceptions.length){
     setExceptionEditState('Add an exception day, or click Edit on an existing one below.');
   } else {
@@ -230,6 +295,50 @@ function startEditException(exceptionId){
   setExceptionEditState(`Editing exception on ${exception.exception_date}. Save to update it.`);
 }
 
+function updateRulePreview(){
+  const weekdayLabel = document.getElementById('ruleWeekday').value || 'saturday';
+  const startTime = document.getElementById('ruleStartTime').value || '11:00';
+  const cadence = Number(document.getElementById('ruleCadence').value || 1);
+  const racesPerDay = Number(document.getElementById('ruleRacesPerDay').value || 1);
+  const raceCount = Number(document.getElementById('ruleRaceCount').value || 0);
+  const validFrom = document.getElementById('ruleValidFrom').value || 'start date not set';
+  const validTo = document.getElementById('ruleValidTo').value || 'end date not set';
+  document.getElementById('rulePreview').textContent = `Preview: ${raceCount || 0} race${raceCount === 1 ? '' : 's'} on ${weekdayLabel} from ${startTime}, every ${cadence} week${cadence === 1 ? '' : 's'}, ${racesPerDay} race${racesPerDay === 1 ? '' : 's'} per day, from ${validFrom} to ${validTo}.`;
+  renderRulePreviewDates();
+}
+
+function renderRulePreviewDates(){
+  const list = document.getElementById('rulePreviewDates');
+  const start = document.getElementById('ruleValidFrom').value;
+  const weekday = parseWeekdayInput(document.getElementById('ruleWeekday').value);
+  const cadence = Number(document.getElementById('ruleCadence').value || 1);
+  const racesPerDay = Number(document.getElementById('ruleRacesPerDay').value || 1);
+  const raceCount = Number(document.getElementById('ruleRaceCount').value || 0);
+  const startTime = document.getElementById('ruleStartTime').value || '11:00';
+  const extraTimes = String(document.getElementById('ruleAdditionalTimes').value || '').split(',').map(v => v.trim()).filter(Boolean);
+  if(!start || weekday === null || cadence < 1 || racesPerDay < 1 || raceCount < 1){
+    list.innerHTML = '';
+    return;
+  }
+  const exceptionSet = new Set((loadedExceptions || []).map(x => x.exception_date));
+  const startDate = new Date(`${start}T00:00:00`);
+  const dayOffset = (weekday - ((startDate.getDay()+6)%7) + 7) % 7;
+  let current = new Date(startDate);
+  current.setDate(current.getDate() + dayOffset);
+  let remaining = raceCount;
+  const items = [];
+  while(remaining > 0 && items.length < 6){
+    const iso = `${current.getFullYear()}-${String(current.getMonth()+1).padStart(2,'0')}-${String(current.getDate()).padStart(2,'0')}`;
+    if(!exceptionSet.has(iso)){
+      const times = [startTime].concat(extraTimes).slice(0, racesPerDay);
+      items.push(`${iso} at ${times.join(', ')}`);
+      remaining -= Math.min(racesPerDay, remaining);
+    }
+    current.setDate(current.getDate() + (7 * cadence));
+  }
+  list.innerHTML = items.map(item => `<li>${esc(item)}</li>`).join('') || '<li>No preview dates available yet.</li>';
+}
+
 function recalcRuleEndDate(){
   const start=document.getElementById('ruleValidFrom').value;
   const weekday=parseWeekdayInput(document.getElementById('ruleWeekday').value);
@@ -237,12 +346,13 @@ function recalcRuleEndDate(){
   const racesPerDay=Number(document.getElementById('ruleRacesPerDay').value||1);
   const raceCount=Number(document.getElementById('ruleRaceCount').value||0);
   const endInput=document.getElementById('ruleValidTo');
-  if(!start||weekday===null||cadence<1||racesPerDay<1||raceCount<1){endInput.value=''; return;}
+  if(!start||weekday===null||cadence<1||racesPerDay<1||raceCount<1){endInput.value=''; updateRulePreview(); return;}
   const s=new Date(`${start}T00:00:00`);
   const daysToAdd=(weekday-((s.getDay()+6)%7)+7)%7;
   let current=addDaysISO(start,daysToAdd), remaining=raceCount;
   while(remaining>0){remaining-=Math.min(racesPerDay,remaining); if(remaining<=0) break; current=addDaysISO(current,7*cadence);} 
   endInput.value=current;
+  updateRulePreview();
 }
 
 function initDates(){
@@ -298,35 +408,44 @@ function getRulePayload(){
 
 async function saveRule(){
   const payload=getRulePayload();
-  if(!payload.start_time||!payload.valid_from||payload.race_count<=0||!payload.valid_to){alert('start_time, valid_from and race_count are required.'); return;}
-  if(payload.races_per_day>1&&payload.additional_start_times.length!==(payload.races_per_day-1)){alert(`Please add exactly ${payload.races_per_day-1} additional start time(s).`); return;}
+  if(!payload.start_time||!payload.valid_from||payload.race_count<=0||!payload.valid_to){setStatus('start_time, valid_from and race_count are required.'); return;}
+  if(payload.races_per_day>1&&payload.additional_start_times.length!==(payload.races_per_day-1)){setStatus(`Please add exactly ${payload.races_per_day-1} additional start time(s).`); return;}
   const url = editingRuleId
     ? `/api/series/manage/${selectedSeriesId}/rules/${editingRuleId}`
     : `/api/series/manage/${selectedSeriesId}/rules`;
   const method = editingRuleId ? 'PUT' : 'POST';
   const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const data=await res.json().catch(()=>({}));
-  if(!res.ok||!data.ok){alert(data.error||(editingRuleId?'Failed to update rule':'Failed to add rule')); return;}
+  if(!res.ok||!data.ok){setStatus(data.error||(editingRuleId?'Failed to update rule':'Failed to add rule')); return;}
   await loadRules();
   if(editingRuleId){
     setRuleEditState('Saved changes to the selected schedule rule.');
     editingRuleId = null;
     setRuleButtonMode();
+    setStatus('Rule saved.');
   } else {
     setRuleEditState('Added a new schedule rule for this series.');
+    setStatus('Rule added.');
   }
+  ruleFormDirty = false;
+  markSavedState();
   resetRuleForm();
 }
 
 async function deleteRule(ruleId){
-  if(!confirm('Remove this rule?')) return;
-  const res=await fetch(`/api/series/manage/${selectedSeriesId}/rules/${ruleId}`,{method:'DELETE'});
-  const data=await res.json().catch(()=>({}));
-  if(!res.ok||!data.ok){alert(data.error||'Failed to remove rule'); return;}
-  if(Number(editingRuleId) === Number(ruleId)){
-    editingRuleId = null;
-  }
-  await loadRules();
+  openConfirm('Remove this schedule rule?', async ()=>{
+    const res=await fetch(`/api/series/manage/${selectedSeriesId}/rules/${ruleId}`,{method:'DELETE'});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok||!data.ok){setStatus(data.error||'Failed to remove rule'); closeConfirm(); return;}
+    if(Number(editingRuleId) === Number(ruleId)){
+      editingRuleId = null;
+    }
+    await loadRules();
+    setStatus('Rule removed.');
+    ruleFormDirty = false;
+    markSavedState();
+    closeConfirm();
+  });
 }
 
 async function loadExceptions(){
@@ -353,44 +472,65 @@ async function loadExceptions(){
     editingExceptionId = null;
   }
   resetExceptionForm();
+  renderRulePreviewDates();
 }
 
 async function saveException(){
   const payload={exception_date:document.getElementById('exDate').value,note:document.getElementById('exNote').value.trim()||null};
-  if(!payload.exception_date){alert('exception_date is required.'); return;}
+  if(!payload.exception_date){setStatus('exception_date is required.'); return;}
   const url = editingExceptionId
     ? `/api/series/manage/${selectedSeriesId}/exceptions/${editingExceptionId}`
     : `/api/series/manage/${selectedSeriesId}/exceptions`;
   const method = editingExceptionId ? 'PUT' : 'POST';
   const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const data=await res.json().catch(()=>({}));
-  if(!res.ok||!data.ok){alert(data.error||(editingExceptionId?'Failed to update exception':'Failed to add exception')); return;}
+  if(!res.ok||!data.ok){setStatus(data.error||(editingExceptionId?'Failed to update exception':'Failed to add exception')); return;}
   await Promise.all([loadExceptions(), loadRules()]);
   if(editingExceptionId){
     setExceptionEditState('Saved changes to the selected exception day.');
+    setStatus('Exception saved.');
   } else {
     setExceptionEditState('Added a new exception day for this series.');
+    setStatus('Exception added.');
   }
+  exceptionFormDirty = false;
+  markSavedState();
   resetExceptionForm();
 }
 
 async function deleteException(exceptionId){
-  if(!confirm('Remove this exception day?')) return;
-  const res=await fetch(`/api/series/manage/${selectedSeriesId}/exceptions/${exceptionId}`,{method:'DELETE'});
-  const data=await res.json().catch(()=>({}));
-  if(!res.ok||!data.ok){alert(data.error||'Failed to remove exception'); return;}
-  if(Number(editingExceptionId) === Number(exceptionId)){
-    editingExceptionId = null;
-  }
-  await Promise.all([loadExceptions(), loadRules()]);
+  openConfirm('Remove this exception day?', async ()=>{
+    const res=await fetch(`/api/series/manage/${selectedSeriesId}/exceptions/${exceptionId}`,{method:'DELETE'});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok||!data.ok){setStatus(data.error||'Failed to remove exception'); closeConfirm(); return;}
+    if(Number(editingExceptionId) === Number(exceptionId)){
+      editingExceptionId = null;
+    }
+    await Promise.all([loadExceptions(), loadRules()]);
+    setStatus('Exception removed.');
+    exceptionFormDirty = false;
+    markSavedState();
+    closeConfirm();
+  });
 }
 
 (async function init(){
   selectedSeriesId=getSeriesId();
   if(!selectedSeriesId){window.location.href='/series/new/name'; return;}
   initDates();
+  updateRulePreview();
   document.getElementById('backBtn').addEventListener('click',()=>{
-    if(!confirmLeaveIfDirty()) return;
+    if(hasUnsavedSchedule()){
+      const what = [];
+      if(ruleFormDirty) what.push('schedule rule form');
+      if(exceptionFormDirty) what.push('exception form');
+      openConfirm(`Leave without saving changes in the ${what.join(' and ')}?`, ()=>{
+        _navigatingAway = true;
+        closeConfirm();
+        window.location.href='/series/new/name';
+      });
+      return;
+    }
     _navigatingAway = true;
     window.location.href='/series/new/name';
   });
@@ -403,9 +543,12 @@ async function deleteException(exceptionId){
   document.getElementById('cancelRuleEditBtn').addEventListener('click',resetRuleForm);
   document.getElementById('addExceptionBtn').addEventListener('click',saveException);
   document.getElementById('cancelExceptionEditBtn').addEventListener('click',resetExceptionForm);
+  document.getElementById('scheduleConfirmOk').addEventListener('click', ()=>{ if (pendingConfirmAction) pendingConfirmAction(); });
+  document.getElementById('scheduleConfirmCancel').addEventListener('click', closeConfirm);
   // recalc + dirty tracking for rule inputs
   ['ruleWeekday','ruleStartTime','ruleAdditionalTimes'].forEach(id=>{
     document.getElementById(id).addEventListener('input', ()=>{ recalcRuleEndDate(); markRuleDirty(); });
+    document.getElementById(id).addEventListener('change', ()=>{ recalcRuleEndDate(); markRuleDirty(); });
   });
   ['ruleCadence','ruleRacesPerDay','ruleRaceCount'].forEach(id=>{
     document.getElementById(id).addEventListener('input', ()=>{ recalcRuleEndDate(); markRuleDirty(); });
@@ -417,7 +560,7 @@ async function deleteException(exceptionId){
   window.addEventListener('beforeunload', _beforeUnloadHandler);
   setRuleButtonMode();
   setExceptionButtonMode();
-  try { await Promise.all([loadSeriesHeader(), loadRules(), loadExceptions()]); } catch(e){ alert(e.message||'Failed to load scheduling'); }
+  try { await Promise.all([loadSeriesHeader(), loadRules(), loadExceptions()]); refreshScheduleSaveMeta(); } catch(e){ setStatus(e.message||'Failed to load scheduling'); }
 })();
 </script>
 </body>

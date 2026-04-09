@@ -14,6 +14,7 @@ from services.mobile_repository import (
     delete_boat,
     get_all_clubs,
     get_assigned_race_ids,
+    get_upcoming_sailor_duties,
     get_boat_class,
     get_boat_classes,
     get_boat_for_join,
@@ -532,6 +533,27 @@ def mobile_control_entries(db, race_id, club_id):
         if race_row is None:
             return {"ok": False, "error": "Race not found"}, 404
         return {"ok": True, "race": dict(race_row), "entries": [dict(r) for r in entries]}, 200
+    except Exception as e:
+        return error_payload_for_exception(e)
+
+
+def mobile_duties(db, sailor_id):
+    try:
+        with db.engine.connect() as conn:
+            rows = get_upcoming_sailor_duties(conn, sailor_id)
+        duties = []
+        for row in rows:
+            race_date = row["race_date"]
+            duties.append({
+                "race_id": row["race_id"],
+                "duty_type": row["duty_type"],
+                "race_date": race_date.isoformat() if race_date else None,
+                "race_no": row["race_no"],
+                "club_name": row["club_name"],
+                "role_code": row["role_code"],
+                "status": row["status"],
+            })
+        return {"ok": True, "duties": duties}, 200
     except Exception as e:
         return error_payload_for_exception(e)
 

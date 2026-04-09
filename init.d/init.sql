@@ -159,6 +159,7 @@ CREATE TABLE "RACINGAPP"."SAILOR_ROLE_GRANT"
 	valid_to		timestamp NULL,
 	granted_by		bigint NULL REFERENCES "RACINGAPP"."CLUBUSER"(key),
 	grant_reason		text NULL,
+	granted_at		timestamp NULL DEFAULT CURRENT_TIMESTAMP,
 	is_active		boolean NOT NULL DEFAULT TRUE
 );
 

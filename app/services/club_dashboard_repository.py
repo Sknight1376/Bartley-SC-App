@@ -6,8 +6,6 @@ def get_sailors_with_boats(conn, club_id):
         text('''
             SELECT sc.key AS sailor_id,
                    sc.fullname,
-                   sc.firstname,
-                   sc.surname,
                    bc.key AS boatkey,
                    bc.sail_number,
                    hc.boat AS boat_class,
@@ -30,9 +28,9 @@ def get_boat_class_usage(conn, club_id):
                    hc.handicap,
                    COUNT(bc.key) AS assigned_count
             FROM "RACINGAPP"."HANDICAPCONTROL" hc
-            LEFT JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.boat = hc.key
-            LEFT JOIN "RACINGAPP"."SAILORCONTROL" sc ON sc.key = bc.sailor
-            WHERE sc.club = :club_id OR sc.club IS NULL
+            JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.boat = hc.key
+            JOIN "RACINGAPP"."SAILORCONTROL" sc ON sc.key = bc.sailor
+            WHERE sc.club = :club_id
             GROUP BY hc.key, hc.boat, hc.handicap
             ORDER BY assigned_count DESC, hc.boat ASC
         '''),
@@ -121,6 +119,7 @@ def get_results_review_queue_rows(conn, club_id, limit=200):
             LEFT JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
             LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
             WHERE r.club = :club_id
+              AND r.status = 'finished'
               AND COALESCE(r.results_status, 'draft') <> 'locked'
             GROUP BY r.key, r.race_no, r.started_at, r.status, r.results_status, r.source_mode, sc.name
             ORDER BY r.started_at DESC NULLS LAST, r.key DESC

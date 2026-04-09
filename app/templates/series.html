@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="static/js/jquery-3.6.3.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
   <style>
-    .series-wrap { width: 990px; margin: 20px auto; }
+    .series-wrap { width: min(990px, calc(100% - 24px)); margin: 20px auto; }
     .series-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
     .series-card h3 { margin: 0 0 12px; color: #1331C5; }
     .row { display:flex; gap:12px; align-items:end; }
@@ -27,13 +28,27 @@
     .form-group label { font-size:12px; font-weight:600; color:#333; }
     .form-group input, .form-group select { width:100%; }
     .form-row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; }
+    .series-toolbar { display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+    .series-search { width:280px; max-width:100%; height:36px; border:1px solid #d0d0d0; border-radius:6px; padding:0 10px; }
+    .series-summary { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; margin-bottom:16px; }
+    .series-stat { background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:14px 16px; }
+    .series-stat-label { font-size:12px; color:#666; margin-bottom:4px; }
+    .series-stat-value { font-size:24px; font-weight:700; color:#1331C5; }
+    .series-chip { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; }
+    .series-chip-ready { background:#dbeafe; color:#1d4ed8; }
+    .series-chip-generated { background:#dcfce7; color:#166534; }
+    .series-chip-draft { background:#fef3c7; color:#92400e; }
+    .series-chip-schedule { background:#ede9fe; color:#6d28d9; }
+    @media (max-width: 900px) {
+      .series-summary { grid-template-columns: 1fr; }
+      .series-table { display:block; overflow-x:auto; }
+      .row { flex-wrap:wrap; }
+    }
   </style>
 </head>
 <body>
-
-<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
-<section class="banner"></section>
-<br>
+{% set active_nav = 'dashboard' %}
+{% include 'partials/app_header.html' %}
 
 <div class="form-border" style="text-align:center;">
   <h4 style="color:#979797">Club Administration</h4>
@@ -42,6 +57,21 @@
 </div>
 
 <div class="series-wrap">
+  <div id="seriesStatus" class="muted" style="margin:0 0 10px;"></div>
+  <div class="series-summary">
+    <div class="series-stat">
+      <div class="series-stat-label">Total series</div>
+      <div id="seriesCount" class="series-stat-value">0</div>
+    </div>
+    <div class="series-stat">
+      <div class="series-stat-label">Draft setups</div>
+      <div id="seriesDraftCount" class="series-stat-value">0</div>
+    </div>
+    <div class="series-stat">
+      <div class="series-stat-label">Ready to generate</div>
+      <div id="seriesReadyCount" class="series-stat-value">0</div>
+    </div>
+  </div>
   <div class="series-card">
     <div class="row" style="justify-content:space-between; align-items:center;">
       <h3 style="margin:0;">Series List</h3>
@@ -50,28 +80,46 @@
     <div style="font-size:12px; color:#666; margin-top:8px;">
       Series setup (schedule, exceptions and scoring) is now managed on a dedicated page.
     </div>
+    <div class="series-toolbar">
+      <input id="seriesSearch" class="series-search" type="text" placeholder="Search series by name or year">
+    </div>
   </div>
 
-  <table class="series-table">
-    <thead>
-      <tr>
-        <th style="width:40%;">Series Name</th>
-        <th style="width:14%;">Year</th>
-        <th style="width:12%;">Races</th>
-        <th style="width:20%;">Next Race</th>
-        <th style="width:14%;">Actions</th>
-      </tr>
-    </thead>
-    <tbody id="seriesBody"></tbody>
-  </table>
+  <div id="seriesEmptyState" class="empty-state-card is-hidden">
+    <h4 id="seriesEmptyTitle" class="empty-state-title">No series yet</h4>
+    <p id="seriesEmptyCopy" class="empty-state-copy">Create your first series to start defining schedules, scoring, and race generation.</p>
+    <div class="empty-state-actions">
+      <button class="btn" onclick="window.location.href='/series/new/start'">Create First Series</button>
+    </div>
+  </div>
+
+  <div id="seriesTableWrap">
+    <table class="series-table">
+      <thead>
+        <tr>
+          <th style="width:40%;">Series Name</th>
+          <th style="width:14%;">Year</th>
+          <th style="width:12%;">Races</th>
+          <th style="width:20%;">Next Race</th>
+          <th style="width:14%;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="seriesBody"></tbody>
+    </table>
+  </div>
 </div>
 
 <div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
-  <button class="blue-button" onclick="window.location.href='/landing'">Back to Landing</button>
+  <button class="blue-button" onclick="window.location.href='/club_dashboard'">Back to Dashboard</button>
 </div>
 
 <script>
 let seriesRows = [];
+let seriesSearch = '';
+
+function setStatus(message) {
+  document.getElementById('seriesStatus').textContent = message || '';
+}
 
 function esc(v) {
   return String(v ?? '')
@@ -94,38 +142,95 @@ async function loadSeries() {
 
 function renderSeries() {
   const tbody = document.getElementById('seriesBody');
+  const emptyState = document.getElementById('seriesEmptyState');
+  const emptyTitle = document.getElementById('seriesEmptyTitle');
+  const emptyCopy = document.getElementById('seriesEmptyCopy');
+  const tableWrap = document.getElementById('seriesTableWrap');
   tbody.innerHTML = '';
 
-  seriesRows.forEach(s => {
+  const classifySeries = (series) => {
+    const totalRaces = Number(series.total_races || 0);
+    const ruleCount = Number(series.rule_count || 0);
+    const discardRuleCount = Number(series.discard_rule_count || 0);
+    if (totalRaces > 0) {
+      return { key: 'generated', label: 'Races Generated', className: 'series-chip series-chip-generated' };
+    }
+    if (ruleCount > 0 && discardRuleCount > 0) {
+      return { key: 'ready', label: 'Ready to Generate', className: 'series-chip series-chip-ready' };
+    }
+    if (ruleCount > 0) {
+      return { key: 'scheduling', label: 'Schedule Added', className: 'series-chip series-chip-schedule' };
+    }
+    return { key: 'draft', label: 'Draft', className: 'series-chip series-chip-draft' };
+  };
+
+  const filtered = seriesRows.filter(s => {
+    if (!seriesSearch) return true;
+    const haystack = `${s.name || ''} ${s.year || ''}`.toLowerCase();
+    return haystack.includes(seriesSearch);
+  });
+
+  const draftCount = seriesRows.filter(s => classifySeries(s).key === 'draft').length;
+  const readyCount = seriesRows.filter(s => classifySeries(s).key === 'ready').length;
+  document.getElementById('seriesCount').textContent = String(seriesRows.length);
+  document.getElementById('seriesDraftCount').textContent = String(draftCount);
+  document.getElementById('seriesReadyCount').textContent = String(readyCount);
+
+  if (!seriesRows.length) {
+    tableWrap.classList.add('is-hidden');
+    emptyState.classList.remove('is-hidden');
+    emptyTitle.textContent = 'No series created yet';
+    emptyCopy.textContent = 'Create your first series to start defining schedules, scoring, and race generation.';
+    return;
+  }
+
+  if (!filtered.length) {
+    tableWrap.classList.add('is-hidden');
+    emptyState.classList.remove('is-hidden');
+    emptyTitle.textContent = 'No matching series';
+    emptyCopy.textContent = `No series match “${seriesSearch}”. Try a different name, year, or clear the search.`;
+    return;
+  }
+
+  tableWrap.classList.remove('is-hidden');
+  emptyState.classList.add('is-hidden');
+
+  filtered.forEach(s => {
     const tr = document.createElement('tr');
+    const status = classifySeries(s);
+    const statusChip = `<span class="${status.className}">${status.label}</span>`;
     tr.innerHTML = `
-      <td>${esc(s.name)}</td>
+      <td>
+        <div style="font-weight:600;">${esc(s.name)}</div>
+        <div style="margin-top:4px;">${statusChip}</div>
+      </td>
       <td>${esc(s.year)}</td>
       <td>${esc(s.total_races ?? 0)}</td>
       <td>${esc(s.next_race_at ?? '-')}</td>
       <td>
-        <button class="btn" onclick="openSeriesSetup(${s.key})">Edit Setup</button>
+        <button class="btn" onclick="openSeriesSetup(${s.key})">Open Setup</button>
       </td>
     `;
     tbody.appendChild(tr);
   });
 
-  if (seriesRows.length === 0) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="5" style="color:#888;">No series created yet.</td>';
-    tbody.appendChild(tr);
-  }
 }
 
 function openSeriesSetup(seriesId) {
-  window.location.href = `/series/new/schedule?series_id=${seriesId}`;
+  window.location.href = `/series/new/summary?series_id=${seriesId}`;
 }
+
+document.getElementById('seriesSearch').addEventListener('input', function () {
+  seriesSearch = (this.value || '').trim().toLowerCase();
+  renderSeries();
+});
 
 (async function init() {
   try {
     await loadSeries();
+    setStatus('');
   } catch (e) {
-    alert(e.message || 'Failed to load page');
+    setStatus(e.message || 'Failed to load series list right now.');
   }
 })();
 </script>

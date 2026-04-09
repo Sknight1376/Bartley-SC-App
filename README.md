@@ -117,6 +117,7 @@ Options:
 ## Change backlog
 
 Desired changes and product backlog items from earlier review are now tracked centrally in [Changes.MD](Changes.MD).
+- Go-live and real-user rollout steps are documented in [GO_LIVE_AND_SUPPORT_PLAN.md](GO_LIVE_AND_SUPPORT_PLAN.md).
 - For your Strava-style vision, don’t make “personal handicap” just a single number; treat it as a time series with confidence, source, club scope, and recommendation rationale.
 - For cross-club comparison, define normalization rules early: by class, handicap basis, fleet size, course length proxy, and weather/context where possible.
 - For club trust, never auto-apply handicap changes; surface recommendation bands, evidence, and approval workflow.

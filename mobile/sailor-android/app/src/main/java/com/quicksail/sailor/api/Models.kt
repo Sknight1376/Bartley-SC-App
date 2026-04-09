@@ -304,3 +304,19 @@ data class SeriesStandingsResponse(
     val error: String? = null,
     val standings: List<SeriesStandingRow> = emptyList()
 )
+
+data class SailorDuty(
+    val race_id: Long,
+    val duty_type: String,
+    val race_date: String?,
+    val race_no: Int?,
+    val club_name: String?,
+    val role_code: String,
+    val status: String
+)
+
+data class DutiesResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val duties: List<SailorDuty> = emptyList()
+)

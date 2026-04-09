@@ -1,49 +1,88 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
 </head>
 <body data-current-series-id="{{ currentSeriesId or '' }}">
-<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
-<section class="banner"></section>
-<br>
+{% set active_nav = 'dashboard' %}
+{% include 'partials/app_header.html' %}
 
 <div class="form-border">
   <div class="entry-banner">
-    <div style="color:#ffffff; text-align:center; line-height:40px; background:#D7D9FD;">1. Add New Series</div>
-    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color:#fff; text-align:center; line-height:40px;">2. Series Name</div>
-    <div style="color:#979797; text-align:center; line-height:40px;">3. Scheduling</div>
-    <div style="color:#979797; text-align:center; line-height:40px;">4. Scoring</div>
-    <div style="color:#979797; text-align:center; line-height:40px;">5. Summary</div>
+    <div class="entry-step entry-step-complete">1. Add New Series</div>
+    <div class="entry-step entry-step-active" style="border-top-right-radius: 120px; border-bottom-right-radius: 120px;">2. Series Name</div>
+    <div class="entry-step">3. Scheduling</div>
+    <div class="entry-step">4. Scoring</div>
+    <div class="entry-step">5. Summary</div>
   </div>
   <br>
   <h4 style="color:#979797">Step Two</h4>
-  <h2>Add Series Name</h2>
+  <h2 id="pageTitle">Add Series Name</h2>
   <h4 style="color:#979797">Year is inferred from schedule start date.</h4>
 
   <div style="padding:0 110px;">
     <label style="color:black;">Series Name</label>
     <input id="seriesName" type="text" placeholder="e.g. Summer Evening Series">
+    <div style="margin-top:6px; font-size:12px; color:#666;">Use a clear, memorable name such as season + format, for example “Spring Pursuit Series”.</div>
+    <div id="nameWarning" style="margin-top:6px; color:#92400e; font-size:12px;"></div>
+    <div id="saveMeta" style="margin-top:6px; color:#1331C5; font-size:12px;"></div>
     <div id="status" style="margin-top:8px; color:#666;"></div>
   </div>
 </div>
 
 <div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
   <button class="blue-button" onclick="window.location.href='/series/new/start'">Back</button>
-  <button id="nextBtn" class="blue-button">> Continue to Scheduling</button>
+  <button id="nextBtn" class="blue-button">Save and Continue</button>
 </div>
 
 <script>
 const currentSeriesId = document.body.dataset.currentSeriesId || null;
+let knownSeries = [];
+let nameDirty = false;
+
+function formatSaveTime() {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function setSaveMeta(message) {
+  document.getElementById('saveMeta').textContent = message || '';
+}
+
+function markNameDirty() {
+  nameDirty = true;
+  setSaveMeta('Unsaved changes');
+}
 
 function getSeriesId() {
   return new URLSearchParams(window.location.search).get('series_id') || currentSeriesId || null;
 }
 
+function checkDuplicateLikeName() {
+  const input = (document.getElementById('seriesName').value || '').trim().toLowerCase();
+  const seriesId = getSeriesId();
+  if (!input) {
+    document.getElementById('nameWarning').textContent = '';
+    return;
+  }
+  const similar = knownSeries.find(s => String(s.key) !== String(seriesId) && String(s.name || '').trim().toLowerCase() === input);
+  document.getElementById('nameWarning').textContent = similar ? `A series named "${similar.name}" already exists.` : '';
+}
+
+async function loadKnownSeries() {
+  const res = await fetch('/api/series/manage', { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok && data.ok) {
+    knownSeries = data.series || [];
+    checkDuplicateLikeName();
+  }
+}
+
 async function createSeriesAndContinue() {
   const name = document.getElementById('seriesName').value.trim();
   if (!name) {
-    alert('Series name is required.');
+    document.getElementById('status').textContent = 'Series name is required.';
     return;
   }
 
@@ -58,10 +97,12 @@ async function createSeriesAndContinue() {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) {
-    alert(data.error || `Failed to ${seriesId ? 'save' : 'create'} series`);
+    document.getElementById('status').textContent = data.error || `Failed to ${seriesId ? 'save' : 'create'} series`;
     return;
   }
 
+  nameDirty = false;
+  setSaveMeta(`Saved at ${formatSaveTime()}`);
   const nextSeriesId = seriesId || data.series_id;
   window.location.href = `/series/new/schedule?series_id=${nextSeriesId}`;
 }
@@ -84,15 +125,23 @@ async function loadExistingSeries() {
 
   document.getElementById('seriesName').value = data.series.name || '';
   document.getElementById('status').textContent = `Editing ${data.series.name}`;
-  document.getElementById('nextBtn').textContent = '> Save and Continue to Scheduling';
+  document.getElementById('pageTitle').textContent = 'Edit Series Name';
+  document.getElementById('nextBtn').textContent = 'Save and Continue';
+  setSaveMeta('Loaded saved draft');
+  checkDuplicateLikeName();
 }
 
 document.getElementById('nextBtn').addEventListener('click', createSeriesAndContinue);
+document.getElementById('seriesName').addEventListener('input', () => {
+  checkDuplicateLikeName();
+  markNameDirty();
+});
 (async function initPage() {
   try {
-    await loadExistingSeries();
+    await Promise.all([loadExistingSeries(), loadKnownSeries()]);
+    if (!getSeriesId()) setSaveMeta('Not saved yet');
   } catch (e) {
-    alert(e.message || 'Failed to load series name');
+    document.getElementById('status').textContent = e.message || 'Failed to load series name';
   }
 })();
 </script>

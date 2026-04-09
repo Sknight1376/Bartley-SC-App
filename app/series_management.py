@@ -126,9 +126,10 @@ def create_series_basic(db, club_id, payload):
         return {"ok": False, "error": str(exc)}, 500
 
 
-def list_series(db, club_id):
+def list_series(db, club_id, ensure_series_schedule_tables):
     try:
         with db.engine.connect() as conn:
+            ensure_series_schedule_tables(conn)
             rows = list_series_manage_rows(conn, club_id)
         return {"ok": True, "series": [dict(r) for r in rows]}, 200
     except Exception as exc:

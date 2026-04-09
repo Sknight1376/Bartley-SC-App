@@ -1,20 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
 </head>
 <body data-current-series-id="{{ currentSeriesId or '' }}">
-<div class="lettering" onclick="window.location.href='/landing'" style="cursor:pointer;">QuickSail</div>
-<section class="banner"></section>
-<br>
+{% set active_nav = 'dashboard' %}
+{% include 'partials/app_header.html' %}
 
 <div class="form-border">
   <div class="entry-banner">
-    <div style="background-image: linear-gradient(to right, #D7D9FD, #A9ADFC); border-top-right-radius: 120px; border-bottom-right-radius: 120px; color:#fff; text-align:center; line-height:40px;">1. Add New Series</div>
-    <div style="color:#979797; text-align:center; line-height:40px;">2. Series Name</div>
-    <div style="color:#979797; text-align:center; line-height:40px;">3. Scheduling</div>
-    <div style="color:#979797; text-align:center; line-height:40px;">4. Scoring</div>
-    <div style="color:#979797; text-align:center; line-height:40px;">5. Summary</div>
+    <div class="entry-step entry-step-active" style="border-top-right-radius: 120px; border-bottom-right-radius: 120px;">1. Add New Series</div>
+    <div class="entry-step">2. Series Name</div>
+    <div class="entry-step">3. Scheduling</div>
+    <div class="entry-step">4. Scoring</div>
+    <div class="entry-step">5. Summary</div>
   </div>
   <br>
   <h4 style="color:#979797">Step One</h4>
@@ -23,25 +24,111 @@
 
   <div id="activeSetupNotice" style="display:none; margin:20px 110px 0; padding:14px 16px; border:1px solid #d0d7ff; border-radius:8px; background:#f7f8ff; color:#444;">
     <strong style="color:#1331C5;">Current setup in progress.</strong>
-    <div style="margin-top:6px; font-size:13px;">You can continue editing the current series setup, or start over with a fresh journey.</div>
+    <div id="activeSetupMeta" style="margin-top:6px; font-size:13px;">You can continue editing the current series setup, or start over with a fresh journey.</div>
+  </div>
+</div>
+
+<div class="wizard-grid">
+  <div class="wizard-card">
+    <h4>What you’ll set up</h4>
+    <ul class="wizard-list">
+      <li><span class="wizard-dot ok"></span>Name the series so sailors can recognise it quickly</li>
+      <li><span class="wizard-dot ok"></span>Define race days, cadence, and exception dates</li>
+      <li><span class="wizard-dot ok"></span>Set discard rules, then generate races when ready</li>
+    </ul>
+  </div>
+  <div class="wizard-card">
+    <h4>Draft status</h4>
+    <span id="draftStatusPill" class="wizard-pill info">New setup</span>
+    <span id="draftProgressMetric" class="wizard-metric">0/4</span>
+    <p id="draftProgressCopy">Complete each step once, then review everything on the summary page before generating races.</p>
+  </div>
+  <div class="wizard-card">
+    <h4>Best workflow</h4>
+    <p>Set the name first, save the schedule as soon as your recurring pattern looks right, and use summary as a final preflight before publishing generated races.</p>
   </div>
 </div>
 
 <div class="form-footer" style="display:flex; justify-content:center; gap:20px;">
   <button class="blue-button" onclick="window.location.href='/series'">Back to Series List</button>
-  <button id="continueBtn" class="blue-button">> Continue</button>
+  <button id="continueBtn" class="blue-button">Continue</button>
   <button id="startOverBtn" class="blue-button" style="display:none; background:#6b7280;">Start Over</button>
 </div>
+
+<div id="setupStatus" class="muted" style="text-align:center; margin-top:10px;"></div>
 
 <script>
 const currentSeriesId = document.body.dataset.currentSeriesId || null;
 const activeSetupNotice = document.getElementById('activeSetupNotice');
 const startOverBtn = document.getElementById('startOverBtn');
+const setupStatus = document.getElementById('setupStatus');
+const activeSetupMeta = document.getElementById('activeSetupMeta');
+const draftStatusPill = document.getElementById('draftStatusPill');
+const draftProgressMetric = document.getElementById('draftProgressMetric');
+const draftProgressCopy = document.getElementById('draftProgressCopy');
+
+function updateDraftSummary(state) {
+  const completedCount = [state.hasName, state.hasRules, state.hasScoring, state.hasRaces].filter(Boolean).length;
+  draftProgressMetric.textContent = `${completedCount}/4`;
+
+  if (!currentSeriesId) {
+    draftStatusPill.className = 'wizard-pill info';
+    draftStatusPill.textContent = 'New setup';
+    draftProgressCopy.textContent = 'Complete each step once, then review everything on the summary page before generating races.';
+    return;
+  }
+
+  if (state.hasRaces) {
+    draftStatusPill.className = 'wizard-pill success';
+    draftStatusPill.textContent = 'Races generated';
+    draftProgressCopy.textContent = 'This draft already has generated races. Open summary to review the current schedule and race list.';
+    return;
+  }
+
+  draftStatusPill.className = completedCount >= 2 ? 'wizard-pill success' : 'wizard-pill warn';
+  draftStatusPill.textContent = completedCount >= 2 ? 'Draft in progress' : 'Early draft';
+  draftProgressCopy.textContent = state.nextStep === 'Summary'
+    ? 'Only the final review remains. Open summary to validate the setup and generate races.'
+    : `Next recommended step: ${state.nextStep}.`;
+}
+
+async function loadCurrentSetupMeta() {
+  if (!currentSeriesId) return;
+  try {
+    const [seriesRes, rulesRes, scoringRes, racesRes] = await Promise.all([
+      fetch(`/api/series/manage/${currentSeriesId}`, { cache: 'no-store' }),
+      fetch(`/api/series/manage/${currentSeriesId}/rules`, { cache: 'no-store' }),
+      fetch(`/api/series/manage/${currentSeriesId}/scoring`, { cache: 'no-store' }),
+      fetch(`/api/series/manage/${currentSeriesId}/races`, { cache: 'no-store' }),
+    ]);
+    const seriesData = await seriesRes.json().catch(() => ({}));
+    const rulesData = await rulesRes.json().catch(() => ({}));
+    const scoringData = await scoringRes.json().catch(() => ({}));
+    const racesData = await racesRes.json().catch(() => ({}));
+    const seriesName = seriesData?.series?.name || 'Untitled draft';
+    const hasName = !!(seriesData?.series?.name || '').trim();
+    const hasRules = (rulesData.rules || []).length > 0;
+    const hasScoring = ((scoringData.scoring || {}).discard_rules || []).length > 0;
+    const hasRaces = (racesData.races || []).length > 0;
+    let currentStep = 'Series Name';
+    if (hasRaces) currentStep = 'Summary';
+    else if (hasScoring) currentStep = 'Summary';
+    else if (hasRules) currentStep = 'Scoring';
+    else if (hasName) currentStep = 'Scheduling';
+    activeSetupMeta.textContent = `Resume draft: ${seriesName}. Current progress appears to be at ${currentStep}.`;
+    updateDraftSummary({ hasName, hasRules, hasScoring, hasRaces, nextStep: currentStep });
+  } catch (_) {
+    activeSetupMeta.textContent = 'You can continue editing the current series setup, or start over with a fresh journey.';
+  }
+}
 
 if (currentSeriesId) {
   activeSetupNotice.style.display = 'block';
   startOverBtn.style.display = 'inline-block';
-  document.getElementById('continueBtn').textContent = '> Continue Current Setup';
+  document.getElementById('continueBtn').textContent = 'Continue Current Setup';
+  loadCurrentSetupMeta();
+} else {
+  updateDraftSummary({ hasName: false, hasRules: false, hasScoring: false, hasRaces: false, nextStep: 'Series Name' });
 }
 
 document.getElementById('continueBtn').addEventListener('click', () => {
@@ -57,12 +144,12 @@ startOverBtn.addEventListener('click', async () => {
     const res = await fetch('/api/series/manage/setup/clear', { method: 'POST' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) {
-      alert(data.error || 'Failed to clear current series setup');
+      setupStatus.textContent = data.error || 'Failed to clear current series setup';
       return;
     }
     window.location.href = '/series/new/name';
   } catch (e) {
-    alert('Failed to clear current series setup');
+    setupStatus.textContent = 'Failed to clear current series setup';
   }
 });
 </script>

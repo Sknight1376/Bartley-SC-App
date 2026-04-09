@@ -1,6 +1,10 @@
 (function () {
   const views = ["sailors", "calendar", "duties", "review", "handicap", "exports", "imports"];
   const manualEntries = [];
+  let dutyMembers = [];
+  let dutyAssignableRaces = [];
+  let dutyRosterRows = [];
+  let pendingDutyAssignment = null;
 
   function esc(v) {
     return String(v ?? "")
@@ -18,6 +22,73 @@
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
   }
 
+  function normalizeRoleCode(value) {
+    const v = String(value || "").trim().toLowerCase();
+    return v || "race_officer";
+  }
+
+  function roleLabel(value) {
+    const code = normalizeRoleCode(value);
+    const labels = {
+      race_officer: "Race Officer",
+      assistant_race_officer: "Assistant Race Officer",
+      timekeeper: "Timekeeper",
+      safety_officer: "Safety Officer",
+      mark_layer: "Mark Layer",
+    };
+    return labels[code] || code.replaceAll("_", " ");
+  }
+
+  function isMobileEligible(roleCode, status) {
+    return normalizeRoleCode(roleCode) === "race_officer" && String(status || "").toLowerCase() === "assigned";
+  }
+
+  function mobileChip(roleCode, status) {
+    if (isMobileEligible(roleCode, status)) {
+      return '<span class="duty-chip duty-chip-mobile-ok">Mobile Enabled</span>';
+    }
+    return '<span class="duty-chip duty-chip-mobile-warn">Not Mobile Enabled</span>';
+  }
+
+  function statusChip(status) {
+    const s = String(status || "assigned").toLowerCase();
+    const cls = s === "confirmed" ? "duty-chip-confirmed" : s === "completed" ? "duty-chip-completed" : "duty-chip-assigned";
+    return `<span class="duty-chip ${cls}">${esc(s)}</span>`;
+  }
+
+  function raceTimingHint(startedAt) {
+    if (!startedAt) return "No scheduled start";
+    const start = new Date(startedAt);
+    if (Number.isNaN(start.getTime())) return "";
+    const now = new Date();
+    const diffMs = start.getTime() - now.getTime();
+    const absMin = Math.round(Math.abs(diffMs) / 60000);
+    const hours = Math.floor(absMin / 60);
+    const minutes = absMin % 60;
+    const part = hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+    if (diffMs > 0) return `Starts in ${part}`;
+    if (diffMs < 0) return `Started ${part} ago`;
+    return "Starting now";
+  }
+
+  function setDutyStatus(message, level = "info") {
+    const node = document.getElementById("dutyStatusMessage");
+    if (!node) return;
+    node.textContent = message || "";
+    node.style.color = level === "error" ? "#991b1b" : level === "success" ? "#166534" : "#6b7280";
+  }
+
+  function openDutyConflictModal() {
+    const modal = document.getElementById("dutyConflictModal");
+    if (modal) modal.classList.add("open");
+  }
+
+  function closeDutyConflictModal() {
+    const modal = document.getElementById("dutyConflictModal");
+    if (modal) modal.classList.remove("open");
+    pendingDutyAssignment = null;
+  }
+
   function setActiveView(view) {
     views.forEach((v) => {
       const section = document.getElementById(`view-${v}`);
@@ -26,6 +97,18 @@
     document.querySelectorAll(".dash-nav-btn[data-view]").forEach((btn) => {
       btn.classList.toggle("active", btn.getAttribute("data-view") === view);
     });
+  }
+
+  function setDashboardStatus(message) {
+    const node = document.getElementById("dashboardStatus");
+    if (!node) return;
+    node.textContent = message || "";
+  }
+
+  function setTableFallback(tbodyId, colspan, message) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="${colspan}" class="muted">${esc(message)}</td></tr>`;
   }
 
   async function getJson(url) {
@@ -41,6 +124,13 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || `Request failed: ${url}`);
+    return data;
+  }
+
+  async function deleteJson(url) {
+    const res = await fetch(url, { method: "DELETE" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) throw new Error(data.error || `Request failed: ${url}`);
     return data;
@@ -83,40 +173,357 @@
         <td>${fmtDateTime(r.started_at)}</td>
         <td>${esc(r.status)}</td>
         <td>${esc(r.results_status || "draft")}</td>
-        <td>${esc(r.source_mode || "live")}</td>
       </tr>
-    `).join("") || `<tr><td colspan="6" class="muted">No races in range</td></tr>`;
+    `).join("") || `<tr><td colspan="5" class="muted">No races in range</td></tr>`;
+  }
+
+  function renderDutyCoverageSnapshot() {
+    const tbody = document.getElementById("dutyUnassignedRows");
+    if (!tbody) return;
+
+    const filterCoverage = (document.getElementById("dutyFilterCoverage")?.value || "all").trim();
+    const coveredRaceIds = new Set(
+      dutyRosterRows
+        .filter((d) => normalizeRoleCode(d.role_code || d.duty_type) === "race_officer" && ["assigned", "confirmed"].includes(String(d.status || "").toLowerCase()))
+        .map((d) => String(d.race_id))
+    );
+
+    const rows = dutyAssignableRaces
+      .map((r) => {
+        const covered = coveredRaceIds.has(String(r.race_id));
+        return { ...r, covered };
+      })
+      .filter((r) => filterCoverage === "all" || (filterCoverage === "covered" ? r.covered : !r.covered));
+
+    tbody.innerHTML = rows.map((r) => `
+      <tr>
+        <td>#${esc(r.race_no)}</td>
+        <td>${esc(r.series_name)}</td>
+        <td>${fmtDateTime(r.started_at)}<div class="duty-inline-note">${esc(raceTimingHint(r.started_at))}</div></td>
+        <td>${r.covered ? '<span class="duty-chip duty-chip-confirmed">Covered</span>' : '<span class="duty-chip duty-chip-mobile-warn">Needs Race Officer</span>'}</td>
+        <td>
+          ${r.covered ? "" : `<button class="dash-nav-btn" style="padding:4px 8px;" data-quick-assign-date="${esc(r.started_at ? r.started_at.substring(0, 10) : '')}">Assign Race Officer</button>`}
+        </td>
+      </tr>
+    `).join("") || `<tr><td colspan="5" class="muted">No races in this coverage view.</td></tr>`;
+
+    tbody.querySelectorAll("button[data-quick-assign-date]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const raceDate = btn.getAttribute("data-quick-assign-date");
+        const dateInput = document.getElementById("dutyDate");
+        const roleSelect = document.getElementById("dutyRoleCode");
+        const statusSelect = document.getElementById("dutyStatus");
+        if (dateInput) dateInput.value = raceDate;
+        if (roleSelect) roleSelect.value = "race_officer";
+        if (statusSelect) statusSelect.value = "assigned";
+        applyMobileModeForSelects("dutyRoleCode", "dutyStatus", "dutyMobileFirst", "dutyEligibilityHint");
+        setDutyStatus("Date selected. Choose a member and click Assign Member.");
+      });
+    });
+  }
+
+  function renderDutyRows() {
+    const rowsNode = document.getElementById("dutyRows");
+    if (!rowsNode) return;
+
+    const filterStatus = (document.getElementById("dutyFilterStatus")?.value || "all").trim();
+    const filterRole = normalizeRoleCode(document.getElementById("dutyFilterRole")?.value || "all");
+    const filterSearch = (document.getElementById("dutyFilterSearch")?.value || "").trim().toLowerCase();
+
+    const filtered = dutyRosterRows.filter((d) => {
+      const statusOk = filterStatus === "all" || String(d.status || "").toLowerCase() === filterStatus;
+      const roleOk = filterRole === "all" || normalizeRoleCode(d.role_code || d.duty_type) === filterRole;
+      const haystack = `${d.sailor_name || ""} ${d.series_name || ""} ${d.race_no || ""} ${d.duty_type || d.role_code || ""}`.toLowerCase();
+      const searchOk = !filterSearch || haystack.includes(filterSearch);
+      return statusOk && roleOk && searchOk;
+    });
+
+    rowsNode.innerHTML = filtered.map((d) => {
+      const roleCode = normalizeRoleCode(d.role_code || d.duty_type);
+      return `
+        <tr>
+          <td>#${esc(d.race_no)}</td>
+          <td>${esc(d.series_name)}</td>
+          <td>${fmtDateTime(d.started_at)}<div class="duty-inline-note">${esc(raceTimingHint(d.started_at))}</div></td>
+          <td>${esc(d.sailor_name)}</td>
+          <td>${esc(roleLabel(roleCode))}</td>
+          <td>${statusChip(d.status)}</td>
+          <td>${mobileChip(roleCode, d.status)}</td>
+          <td>
+            <button class="dash-nav-btn" style="padding:4px 8px;" data-copy-duty="${esc(d.duty_id)}" data-race-no="${esc(d.race_no)}" data-series-name="${esc(d.series_name)}" data-sailor-name="${esc(d.sailor_name)}">Copy Mobile Steps</button>
+            <button class="dash-nav-btn" style="padding:4px 8px; margin-left:6px;" data-delete-duty="${esc(d.duty_id)}" data-delete-race="${esc(d.race_id)}">Remove</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || `<tr><td colspan="8" class="muted">No duty assignments match the current filters.</td></tr>`;
+
+    rowsNode.querySelectorAll("button[data-delete-duty]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const dutyId = btn.getAttribute("data-delete-duty");
+        const raceId = btn.getAttribute("data-delete-race");
+        try {
+          await deleteJson(`/api/races/${encodeURIComponent(raceId)}/duties/${encodeURIComponent(dutyId)}`);
+          setDutyStatus("Duty assignment removed.", "success");
+          await Promise.all([loadDuties(), loadDutyControls()]);
+        } catch (e) {
+          setDutyStatus(e.message || "Failed to remove duty assignment.", "error");
+        }
+      });
+    });
+
+    rowsNode.querySelectorAll("button[data-copy-duty]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const text = [
+          `Race duty assigned: ${btn.getAttribute("data-series-name")} race #${btn.getAttribute("data-race-no")}`,
+          `Member: ${btn.getAttribute("data-sailor-name")}`,
+          "In the Sailor app, open Race Control > Upcoming Races to access your assigned duty race.",
+        ].join("\n");
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            setDutyStatus("Mobile handoff steps copied to clipboard.", "success");
+          } else {
+            setDutyStatus(text, "info");
+          }
+        } catch (e) {
+          setDutyStatus("Unable to copy. " + text, "info");
+        }
+      });
+    });
+
+    renderDutyCoverageSnapshot();
   }
 
   async function loadDuties() {
     const data = await getJson("/api/dashboard/duty-roster");
-    const rows = document.getElementById("dutyRows");
-    rows.innerHTML = (data.duties || []).map((d) => `
+    dutyRosterRows = data.duties || [];
+    renderDutyRows();
+  }
+
+  function populateDutyControls() {
+    const dateInput = document.getElementById("dutyDate");
+    const sailorSelect = document.getElementById("dutySailorId");
+    if (!sailorSelect) return;
+
+    if (dateInput && !dateInput.value) {
+      const today = new Date();
+      dateInput.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    }
+
+    const sailorOptions = dutyMembers.map((m) => `<option value="${esc(m.id)}">${esc(m.full_name)}</option>`).join("");
+    sailorSelect.innerHTML = `<option value="">Select member...</option>${sailorOptions}`;
+
+    renderDutyCoverageSnapshot();
+  }
+
+  async function loadDutyControls() {
+    const today = new Date();
+    const fromDate = new Date(today);
+    fromDate.setDate(fromDate.getDate() - 14);
+    const toDate = new Date(today);
+    toDate.setDate(toDate.getDate() + 120);
+    const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const qs = new URLSearchParams({ from_date: toIso(fromDate), to_date: toIso(toDate) });
+
+    const [calendarData, membersData] = await Promise.all([
+      getJson(`/api/dashboard/race-calendar?${qs.toString()}`),
+      getJson("/api/members"),
+    ]);
+
+    dutyAssignableRaces = (calendarData.races || []).map((r) => ({
+      race_id: r.race_id,
+      race_no: r.race_no,
+      series_name: r.series_name,
+      started_at: r.started_at,
+    }));
+    dutyMembers = (membersData.members || []).slice().sort((a, b) => String(a.full_name || "").localeCompare(String(b.full_name || "")));
+    populateDutyControls();
+    renderDutyCoverageSnapshot();
+  }
+
+  function updateDutyEligibilityHint() {
+    const node = document.getElementById("dutyEligibilityHint");
+    if (!node) return;
+    const roleCode = (document.getElementById("dutyRoleCode")?.value || "race_officer").trim();
+    const status = (document.getElementById("dutyStatus")?.value || "assigned").trim();
+    if (isMobileEligible(roleCode, status)) {
+      node.innerHTML = 'This assignment will <strong>enable mobile race control access</strong> for the selected member.';
+      node.style.color = "#166534";
+    } else {
+      node.innerHTML = 'Mobile control access requires <strong>Race Officer</strong> role with <strong>Assigned</strong> status.';
+      node.style.color = "#92400e";
+    }
+  }
+
+  function applyMobileModeForSelects(roleSelectId, statusSelectId, modeToggleId, hintId) {
+    const roleSelect = document.getElementById(roleSelectId);
+    const statusSelect = document.getElementById(statusSelectId);
+    const modeToggle = document.getElementById(modeToggleId);
+    const hintNode = hintId ? document.getElementById(hintId) : null;
+    if (!roleSelect || !statusSelect || !modeToggle) return;
+
+    const mobileMode = !!modeToggle.checked;
+
+    Array.from(roleSelect.options).forEach((opt) => {
+      opt.disabled = mobileMode && String(opt.value) !== "race_officer";
+    });
+    Array.from(statusSelect.options).forEach((opt) => {
+      opt.disabled = mobileMode && String(opt.value) !== "assigned";
+    });
+
+    if (mobileMode) {
+      roleSelect.value = "race_officer";
+      statusSelect.value = "assigned";
+      if (hintNode) {
+        hintNode.innerHTML = 'Mobile-enabled mode is ON. Role/status are locked to <strong>Race Officer</strong> and <strong>Assigned</strong>.';
+        hintNode.style.color = "#166534";
+      }
+    } else if (hintNode) {
+      const roleCode = (roleSelect.value || "").trim();
+      const statusValue = (statusSelect.value || "").trim();
+      if (isMobileEligible(roleCode, statusValue)) {
+        hintNode.innerHTML = 'This assignment will <strong>enable mobile race control access</strong> for the selected member.';
+        hintNode.style.color = "#166534";
+      } else {
+        hintNode.innerHTML = 'Mobile control access requires <strong>Race Officer</strong> role with <strong>Assigned</strong> status.';
+        hintNode.style.color = "#92400e";
+      }
+    }
+  }
+
+  function getDutyConflicts(date, sailorId) {
+    const conflicts = [];
+    dutyRosterRows
+      .filter((d) => String(d.sailor) === String(sailorId) && d.started_at && d.started_at.substring(0, 10) === date)
+      .forEach((d) => {
+        conflicts.push({
+          type: "Same-day assignment",
+          race_no: d.race_no,
+          series_name: d.series_name,
+          started_at: d.started_at,
+          status: d.status,
+          duty: roleLabel(d.role_code || d.duty_type),
+        });
+      });
+    return conflicts;
+  }
+
+  function showDutyConflicts(conflicts, date, sailorId) {
+    const tbody = document.getElementById("dutyConflictRows");
+    const intro = document.getElementById("dutyConflictIntro");
+    const sailor = dutyMembers.find((m) => String(m.id) === String(sailorId));
+    if (!tbody || !intro) return;
+
+    intro.textContent = `Review ${conflicts.length} potential conflict(s) before assigning ${sailor?.full_name || "this member"} to all races on ${date}.`;
+    tbody.innerHTML = conflicts.map((c) => `
       <tr>
-        <td>#${esc(d.race_no)}</td>
-        <td>${esc(d.series_name)}</td>
-        <td>${esc(d.sailor_name)}</td>
-        <td>${esc(d.duty_type || d.role_code)}</td>
-        <td>${esc(d.status)}</td>
-        <td>${esc(d.notes || "")}</td>
+        <td>${esc(c.type)}</td>
+        <td>#${esc(c.race_no || "-")}</td>
+        <td>${esc(c.series_name || "-")}</td>
+        <td>${fmtDateTime(c.started_at)}</td>
+        <td>${statusChip(c.status)}</td>
+        <td>${esc(c.duty || "-")}</td>
       </tr>
-    `).join("") || `<tr><td colspan="6" class="muted">No duty assignments found</td></tr>`;
+    `).join("");
+
+    openDutyConflictModal();
+  }
+
+  async function submitDutyAssignment(payload) {
+    await postJson(`/api/races/duties/by-date`, {
+      sailor_id: Number(payload.sailorId),
+      role_code: payload.roleCode,
+      duty_type: payload.roleCode,
+      status: payload.statusValue,
+      date: payload.date,
+    });
+
+    setDutyStatus(
+      isMobileEligible(payload.roleCode, payload.statusValue)
+        ? `Duty assignment saved for all races on ${payload.date} and mobile control access is enabled.`
+        : `Duty assignment saved for all races on ${payload.date}. This role/status will not unlock mobile race control.`,
+      "success"
+    );
+
+    await Promise.all([loadDuties(), loadDutyControls()]);
+  }
+
+  async function assignDuty() {
+    const date = (document.getElementById("dutyDate")?.value || "").trim();
+    const sailorId = (document.getElementById("dutySailorId")?.value || "").trim();
+    const roleCode = (document.getElementById("dutyRoleCode")?.value || "race_officer").trim();
+    const statusValue = (document.getElementById("dutyStatus")?.value || "assigned").trim();
+    if (!date || !sailorId) {
+      setDutyStatus("Select a date and member before assigning duty.", "error");
+      return;
+    }
+
+    const conflicts = getDutyConflicts(date, sailorId);
+    if (conflicts.length) {
+      pendingDutyAssignment = { date, sailorId, roleCode, statusValue };
+      showDutyConflicts(conflicts, date, sailorId);
+      setDutyStatus("Potential conflicts found. Review and confirm to continue.", "error");
+      return;
+    }
+
+    try {
+      await submitDutyAssignment({ date, sailorId, roleCode, statusValue });
+    } catch (e) {
+      setDutyStatus(e.message || "Failed to assign duty.", "error");
+    }
   }
 
   async function loadReviewQueue() {
     const data = await getJson("/api/dashboard/results-review-queue");
     const rows = document.getElementById("reviewRows");
+    const statusEl = document.getElementById("dashboardStatus");
     rows.innerHTML = (data.queue || []).map((r) => `
-      <tr>
+      <tr data-race-id="${esc(r.race_id)}">
         <td>#${esc(r.race_no)}</td>
         <td>${esc(r.series_name)}</td>
-        <td>${esc(r.status)}</td>
+        <td>${fmtDateTime(r.started_at)}</td>
         <td>${esc(r.results_status || "draft")}</td>
         <td>${esc(r.entry_count)}</td>
         <td>${esc(r.finish_count)}</td>
-        <td><a href="/race_summary?race_id=${encodeURIComponent(r.race_id)}">Open</a></td>
+        <td style="white-space:nowrap;">
+          <a href="/race_summary?race_id=${encodeURIComponent(r.race_id)}" style="margin-right:6px;">View</a>
+          <button class="dash-nav-btn" style="padding:3px 8px; margin-right:6px;" data-confirm-race="${esc(r.race_id)}">Confirm Results</button>
+          <button class="dash-nav-btn" style="padding:3px 8px;" data-edit-race="${esc(r.race_id)}">Edit</button>
+        </td>
       </tr>
-    `).join("") || `<tr><td colspan="7" class="muted">Queue is empty</td></tr>`;
+    `).join("") || `<tr><td colspan="7" class="muted">No finished races pending review</td></tr>`;
+
+    rows.querySelectorAll("button[data-confirm-race]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const raceId = btn.getAttribute("data-confirm-race");
+        btn.disabled = true;
+        btn.textContent = "Confirming\u2026";
+        try {
+          const res = await fetch(`/api/races/${encodeURIComponent(raceId)}/results/lock`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok || !d.ok) throw new Error(d.error || "Failed to confirm results");
+          if (statusEl) statusEl.textContent = `Race ${raceId} results confirmed.`;
+          await loadReviewQueue();
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = "Confirm Results";
+          if (statusEl) statusEl.textContent = e.message || "Failed to confirm results.";
+        }
+      });
+    });
+
+    rows.querySelectorAll("button[data-edit-race]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const raceId = btn.getAttribute("data-edit-race");
+        setActiveView("imports");
+        setWorkflowRaceId(raceId);
+        previewRetrospective();
+      });
+    });
   }
 
   async function loadHandicapRecommendations() {
@@ -435,6 +842,28 @@
   document.getElementById("reloadRetrospectiveBtn")?.addEventListener("click", loadRetrospectiveRaces);
   document.getElementById("previewRetrospectiveBtn")?.addEventListener("click", previewRetrospective);
   document.getElementById("publishRetrospectiveBtn")?.addEventListener("click", publishRetrospective);
+  document.getElementById("assignDutyBtn")?.addEventListener("click", assignDuty);
+  document.getElementById("dutyRoleCode")?.addEventListener("change", updateDutyEligibilityHint);
+  document.getElementById("dutyStatus")?.addEventListener("change", updateDutyEligibilityHint);
+  document.getElementById("dutyMobileFirst")?.addEventListener("change", () => {
+    applyMobileModeForSelects("dutyRoleCode", "dutyStatus", "dutyMobileFirst", "dutyEligibilityHint");
+    updateDutyEligibilityHint();
+  });
+  document.getElementById("dutyConflictCloseBtn")?.addEventListener("click", closeDutyConflictModal);
+  document.getElementById("dutyConflictCancelBtn")?.addEventListener("click", closeDutyConflictModal);
+  document.getElementById("dutyConflictConfirmBtn")?.addEventListener("click", async () => {
+    if (!pendingDutyAssignment) return;
+    try {
+      await submitDutyAssignment(pendingDutyAssignment);
+      closeDutyConflictModal();
+    } catch (e) {
+      setDutyStatus(e.message || "Failed to assign duty.", "error");
+    }
+  });
+  document.getElementById("dutyFilterStatus")?.addEventListener("change", renderDutyRows);
+  document.getElementById("dutyFilterRole")?.addEventListener("change", renderDutyRows);
+  document.getElementById("dutyFilterCoverage")?.addEventListener("change", renderDutyRows);
+  document.getElementById("dutyFilterSearch")?.addEventListener("input", renderDutyRows);
   document.getElementById("clearManualEntriesBtn")?.addEventListener("click", () => {
     manualEntries.length = 0;
     document.getElementById("manualImportStatus").textContent = "Manual rows cleared.";
@@ -442,19 +871,40 @@
   });
 
   (async function init() {
-    try {
-      await Promise.all([
-        loadSailorsBoats(),
-        loadCalendar(),
-        loadDuties(),
-        loadReviewQueue(),
-        loadHandicapRecommendations(),
-        loadSeriesOptions(),
-        loadRetrospectiveRaces(),
-      ]);
-      renderManualEntries();
-    } catch (e) {
-      alert(e.message || "Failed to load dashboard");
+    const errors = [];
+
+    const tasks = [
+      { run: loadSailorsBoats, fallback: () => {
+          setTableFallback("sailorsRows", 2, "Unable to load sailors right now.");
+          setTableFallback("boatClassRows", 3, "Unable to load boat classes right now.");
+        }
+      },
+      { run: loadCalendar, fallback: () => setTableFallback("calendarRows", 5, "Unable to load race calendar right now.") },
+      { run: loadDuties, fallback: () => setTableFallback("dutyRows", 8, "Unable to load duty roster right now.") },
+      { run: loadDutyControls },
+      { run: loadReviewQueue, fallback: () => setTableFallback("reviewRows", 7, "Unable to load review queue right now.") },
+      { run: loadHandicapRecommendations, fallback: () => setTableFallback("handicapRows", 6, "Unable to load handicap recommendations right now.") },
+      { run: loadSeriesOptions },
+      { run: loadRetrospectiveRaces, fallback: () => setTableFallback("retrospectiveRows", 8, "Unable to load retrospective races right now.") },
+    ];
+
+    for (const task of tasks) {
+      try {
+        await task.run();
+      } catch (e) {
+        errors.push(e?.message || "Request failed");
+        if (task.fallback) task.fallback();
+      }
     }
+
+    if (errors.length) {
+      setDashboardStatus("Some dashboard data is temporarily unavailable. You can keep working and retry specific sections.");
+    } else {
+      setDashboardStatus("");
+    }
+
+    renderManualEntries();
+    applyMobileModeForSelects("dutyRoleCode", "dutyStatus", "dutyMobileFirst", "dutyEligibilityHint");
+    updateDutyEligibilityHint();
   })();
 })();

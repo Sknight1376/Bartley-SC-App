@@ -1,12 +1,18 @@
-races/Race_2.csv
-races/Race.csv
+# Local race data exports
+races/*.csv
+
 database.db
-*/__pycache__
-__pycache__
-api.log
+**/__pycache__/
+__pycache__/
+*.pyc
+*.log
 
 # Local secrets — see .env.example for the template
 .env
+
+# VS Code workspace — contains machine-specific WSL URIs and local extension config
+.vscode/
+*.code-workspace
 
 # Android/Gradle local artifacts
 mobile/sailor-android/.gradle/
