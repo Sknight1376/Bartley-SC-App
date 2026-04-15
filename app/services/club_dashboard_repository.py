@@ -175,6 +175,7 @@ def get_export_results_rows(conn, race_id):
                    re.boat,
                    re.sail_number,
                    re.handicap,
+                   COALESCE(MAX(l.lap_number), COUNT(l.key), 0) AS lap_count,
                    MAX(CASE WHEN l.is_finish THEN l.elapsed_sec END) AS elapsed_sec,
                    MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS corrected_sec,
                    MAX(CASE WHEN l.is_finish THEN l.position END) AS position,
@@ -183,7 +184,17 @@ def get_export_results_rows(conn, race_id):
             LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
             WHERE re.race_id = :race_id
             GROUP BY re.key, re.sailor, re.boat, re.sail_number, re.handicap
-            ORDER BY position ASC NULLS LAST, corrected_sec ASC NULLS LAST, re.key ASC
+            ORDER BY CASE
+                       WHEN COALESCE(MAX(l.lap_number), COUNT(l.key), 0) > 0
+                       THEN ROUND(MAX(CASE WHEN l.is_finish THEN l.corrected_sec END)::numeric / COALESCE(MAX(l.lap_number), COUNT(l.key), 0), 0)
+                       ELSE MAX(CASE WHEN l.is_finish THEN l.corrected_sec END)
+                     END ASC NULLS LAST,
+                     CASE
+                       WHEN COALESCE(MAX(l.lap_number), COUNT(l.key), 0) > 0
+                       THEN ROUND(MAX(CASE WHEN l.is_finish THEN l.elapsed_sec END)::numeric / COALESCE(MAX(l.lap_number), COUNT(l.key), 0), 0)
+                       ELSE MAX(CASE WHEN l.is_finish THEN l.elapsed_sec END)
+                     END ASC NULLS LAST,
+                     re.key ASC
         '''),
         {"race_id": race_id},
     ).mappings().all()
@@ -199,16 +210,21 @@ def get_latest_race_results_rows(conn, club_id, limit=5):
                    re.sailor,
                    re.boat,
                    re.sail_number,
+                   COALESCE(MAX(l.lap_number), COUNT(l.key), 0) AS lap_count,
                    MAX(CASE WHEN l.is_finish THEN l.position END) AS position,
-                   MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS corrected_sec
+                   CASE
+                     WHEN COALESCE(MAX(l.lap_number), COUNT(l.key), 0) > 0
+                     THEN ROUND(MAX(CASE WHEN l.is_finish THEN l.corrected_sec END)::numeric / COALESCE(MAX(l.lap_number), COUNT(l.key), 0), 0)
+                     ELSE MAX(CASE WHEN l.is_finish THEN l.corrected_sec END)
+                   END AS corrected_sec
             FROM "RACINGAPP"."RACE" r
             JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
             JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
             LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
             WHERE r.club = :club_id
               AND r.status = 'finished'
-            GROUP BY r.key, r.race_no, sc.name, r.started_at, re.sailor, re.boat, re.sail_number
-            ORDER BY r.started_at DESC NULLS LAST, position ASC NULLS LAST, corrected_sec ASC NULLS LAST
+            GROUP BY r.key, r.race_no, sc.name, r.started_at, re.key, re.sailor, re.boat, re.sail_number
+            ORDER BY r.started_at DESC NULLS LAST, corrected_sec ASC NULLS LAST, re.key ASC
             LIMIT :limit
         '''),
         {"club_id": club_id, "limit": int(limit)},

@@ -494,13 +494,6 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
     LaunchedEffect(state.login?.sailor_id) {
         vm.loadDashboard()
         vm.loadClubSeriesStandings()
-        vm.loadControlAccess()
-    }
-
-    LaunchedEffect(state.canRaceControl, homePage) {
-        if (!state.canRaceControl && homePage == HomePage.RACE_CONTROL) {
-            homePage = HomePage.DASHBOARD
-        }
     }
 
     LaunchedEffect(refreshing) {
@@ -533,7 +526,7 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                 }
                 HomePage.SERIES_RESULTS -> vm.loadClubSeriesStandings()
                 HomePage.RACE_CONTROL -> {
-                    vm.loadControlAccess()
+                    vm.refreshRaces()
                     vm.loadControlRaces()
                     state.selectedControlRaceId?.let { vm.loadControlEntries(it) }
                 }
@@ -542,15 +535,12 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
     )
 
     val onPageSelected: (HomePage) -> Unit = { page ->
-        if (page == HomePage.RACE_CONTROL && !state.canRaceControl) {
-            vm.loadControlAccess()
-        } else {
-            homePage = page
-            when (page) {
-                HomePage.DASHBOARD -> vm.loadDashboard()
-                HomePage.SERIES_RESULTS -> vm.loadClubSeriesStandings()
-                HomePage.PROFILE, HomePage.RACE_CONTROL -> Unit
-            }
+        homePage = page
+        when (page) {
+            HomePage.DASHBOARD -> vm.loadDashboard()
+            HomePage.SERIES_RESULTS -> vm.loadClubSeriesStandings()
+            HomePage.RACE_CONTROL -> vm.refreshRaces()
+            HomePage.PROFILE -> Unit
         }
     }
 
@@ -559,19 +549,11 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar {
-                // Once access is confirmed denied, hide Race Control entirely from the nav
-                // so non-duty sailors see a clean nav without a permanently greyed tab.
-                // While still loading (!controlAccessLoaded) keep the item so layout is stable.
-                val visiblePages = HomePage.values().filter { page ->
-                    page != HomePage.RACE_CONTROL ||
-                    !state.controlAccessLoaded ||
-                    state.canRaceControl
-                }
-                visiblePages.forEach { page ->
+                HomePage.values().forEach { page ->
                     NavigationBarItem(
                         selected = homePage == page,
                         onClick = { onPageSelected(page) },
-                        enabled = page != HomePage.RACE_CONTROL || state.canRaceControl,
+                        enabled = true,
                         icon = {},
                         label = {
                             Text(
@@ -730,16 +712,7 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                         )
                     }
                     HomePage.SERIES_RESULTS -> SeriesResultsPage(state, vm)
-                    HomePage.RACE_CONTROL -> {
-                        if (state.canRaceControl) {
-                            RaceControlSection(state, vm)
-                        } else {
-                            RaceControlDisabledSection(
-                                accessLoaded = state.controlAccessLoaded,
-                                onRefreshAccess = { vm.loadControlAccess() }
-                            )
-                        }
-                    }
+                    HomePage.RACE_CONTROL -> RaceTabSection(state, vm)
                 }
             }
 
@@ -1689,6 +1662,133 @@ private fun RaceRow(
                         .semantics { contentDescription = "View results for race ${race.race_no}" }
                 ) {
                     Text("Results")
+                }
+            }
+        }
+    }
+}
+
+private fun parseStartedAtMs(raw: String?): Long? = runCatching {
+    if (raw.isNullOrBlank()) return null
+    SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(
+        raw.substringBefore("+").substringBefore("Z").substringBefore(".")
+    )?.time
+}.getOrNull()
+
+private fun formatRaceCountdown(startMs: Long, nowMs: Long): String {
+    val diffMs = startMs - nowMs
+    return when {
+        diffMs > 60_000L -> {
+            val totalMin = (diffMs / 60_000L).toInt()
+            val h = totalMin / 60; val m = totalMin % 60
+            if (h > 0) "Starts in ${h}h ${m}m" else "Starts in ${m}m"
+        }
+        diffMs > 0L -> "Starts in <1m"
+        diffMs > -3_600_000L -> "In progress"
+        else -> "Started ${((-diffMs) / 3_600_000L).toInt()}h ago"
+    }
+}
+
+@Composable
+private fun RaceTabSection(state: SailorUiState, vm: SailorViewModel) {
+    var controlOpen by rememberSaveable { mutableStateOf(false) }
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    // Tick every 30 seconds so the enable-window updates without a manual refresh
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+
+    if (controlOpen && state.selectedControlRaceId != null) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextButton(
+                onClick = { controlOpen = false },
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
+                Text("← Back to Races")
+            }
+            RaceControlSection(state, vm)
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                "Race Control",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() }
+            )
+
+            if (state.races.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        "No upcoming races. Pull to refresh.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            } else {
+                state.races.forEach { race ->
+                    val startMs = parseStartedAtMs(race.started_at)
+                    // Enable when race is active OR scheduled start ≤ 10 minutes away (and not more than 2 hours past)
+                    val minutesUntilStart = if (startMs != null) (startMs - nowMs) / 60_000L else null
+                    val canOpen = race.status == "active" ||
+                        (minutesUntilStart != null && minutesUntilStart <= 10L && minutesUntilStart >= -120L)
+                    val countdownText = startMs?.let { formatRaceCountdown(it, nowMs) } ?: ""
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "${race.series_name} — Race #${race.race_no}",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    if (!race.started_at.isNullOrBlank()) {
+                                        Text(
+                                            race.started_at,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                    if (countdownText.isNotBlank()) {
+                                        Text(
+                                            countdownText,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (canOpen) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                                Button(
+                                    onClick = {
+                                        vm.selectControlRace(race.race_id)
+                                        vm.loadControlEntries(race.race_id)
+                                        controlOpen = true
+                                    },
+                                    enabled = canOpen,
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                ) {
+                                    Text("Open")
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

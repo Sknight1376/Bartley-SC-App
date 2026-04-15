@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
   <style>
     .dashboard-wrap { width: 1100px; margin: 20px auto 60px; text-align: left; }
-    .dashboard-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+    .dashboard-nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
     .dash-nav-btn { border: 1px solid #d4d8ff; background: #fff; color: #1331C5; padding: 10px 12px; border-radius: 8px; font-weight: 600; cursor: pointer; }
     .dash-nav-btn.active { background: #1331C5; color: #fff; }
     .dash-card { background: #fff; border: 1px solid #dfe3fb; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.06); margin-top: 16px; }
@@ -27,52 +27,6 @@
     .dash-card-header h3 { margin:0; color:#1331C5; }
     .dash-card > h3 { display:none; }
     .dash-header-actions { display:flex; gap:8px; }
-    .duty-chip { display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; font-weight:600; }
-    .duty-chip-assigned { background:#dbeafe; color:#1d4ed8; }
-    .duty-chip-confirmed { background:#dcfce7; color:#166534; }
-    .duty-chip-completed { background:#e5e7eb; color:#374151; }
-    .duty-chip-mobile-ok { background:#ecfdf3; color:#166534; }
-    .duty-chip-mobile-warn { background:#fffbeb; color:#92400e; }
-    .duty-subcard { border:1px solid #e7eaff; border-radius:10px; padding:10px 12px; margin-bottom:10px; background:#fafbff; }
-    .duty-subcard h4 { margin:0 0 8px; color:#1331C5; }
-    .duty-unassigned { margin-top:10px; }
-    .duty-inline-note { font-size:12px; color:#6b7280; margin-top:4px; }
-    .duty-modal-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(15, 23, 42, 0.45);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 1100;
-      padding: 16px;
-    }
-    .duty-modal-backdrop.open { display:flex; }
-    .duty-modal {
-      width: min(880px, 100%);
-      background: #fff;
-      border-radius: 12px;
-      border: 1px solid #dbe3ff;
-      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
-      overflow: hidden;
-    }
-    .duty-modal-head {
-      padding: 12px 14px;
-      border-bottom: 1px solid #e8ecff;
-      display:flex;
-      justify-content: space-between;
-      align-items: center;
-      color:#1331C5;
-      font-weight:700;
-    }
-    .duty-modal-body { padding: 12px 14px; max-height: 55vh; overflow: auto; }
-    .duty-modal-foot {
-      padding: 12px 14px;
-      border-top: 1px solid #e8ecff;
-      display:flex;
-      justify-content: flex-end;
-      gap: 8px;
-    }
   </style>
 </head>
 <body>
@@ -90,11 +44,9 @@
     <div class="dashboard-nav">
       <button class="dash-nav-btn active" data-view="sailors">Sailors & Boats</button>
       <button class="dash-nav-btn" data-view="calendar">Race Calendar</button>
-      <button class="dash-nav-btn" data-view="duties">Race-Duty Roster</button>
-      <button class="dash-nav-btn" data-view="review">Results Review Queue</button>
+      <button class="dash-nav-btn" data-view="imports">Race Queue</button>
       <button class="dash-nav-btn" data-view="handicap">Handicap Recommendations</button>
       <button class="dash-nav-btn" data-view="exports">Exports</button>
-      <button class="dash-nav-btn" data-view="imports">Imports (Paper / CSV)</button>
     </div>
 
     <section id="view-sailors" class="dash-card">
@@ -133,91 +85,98 @@
       </div>
     </section>
 
-    <section id="view-duties" class="dash-card hidden">
-      <h3>Race-Duty Roster</h3>
-      <div class="dash-body">
-        <div class="duty-subcard">
-          <h4>Assign Duty by Date</h4>
-          <div class="dash-controls" style="flex-wrap:wrap; margin-bottom:6px;">
-            <label>Date
-              <input type="date" id="dutyDate" style="min-width:160px;">
-            </label>
-            <label>Member
-              <select id="dutySailorId" style="min-width:220px;"><option value="">Select member...</option></select>
-            </label>
-            <label>Role
-              <select id="dutyRoleCode">
-                <option value="race_officer">Race Officer</option>
-                <option value="assistant_race_officer">Assistant Race Officer</option>
-                <option value="timekeeper">Timekeeper</option>
-                <option value="safety_officer">Safety Officer</option>
-                <option value="mark_layer">Mark Layer</option>
-              </select>
-            </label>
-            <label>Status
-              <select id="dutyStatus">
-                <option value="assigned">Assigned</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="completed">Completed</option>
-              </select>
-            </label>
-          </div>
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-            <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
-              <input type="checkbox" id="dutyMobileFirst" checked>
-              Mobile-enabled
-            </label>
-            <button class="dash-nav-btn" id="assignDutyBtn">Assign Member</button>
-          </div>
-          <div id="dutyEligibilityHint" class="duty-inline-note">Mobile control access requires <strong>Race Officer</strong> role with <strong>Assigned</strong> status.</div>
+    <section id="view-imports" class="dash-card hidden">
+      <div class="dash-card-header">
+        <h3>Race Queue</h3>
+        <div class="dash-header-actions">
+          <button class="dash-nav-btn" id="showUnapprovedRacesBtn" type="button">Pending Approval</button>
+          <button class="dash-nav-btn" id="showApprovedRacesBtn" type="button">Approved</button>
         </div>
-
-        <div class="dash-controls" style="margin-bottom:10px;">
-          <label>Filter status
-            <select id="dutyFilterStatus">
-              <option value="all">All</option>
-              <option value="assigned">Assigned</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="completed">Completed</option>
-            </select>
-          </label>
-          <label>Filter role
-            <select id="dutyFilterRole">
-              <option value="all">All</option>
-              <option value="race_officer">Race Officer</option>
-              <option value="assistant_race_officer">Assistant Race Officer</option>
-              <option value="timekeeper">Timekeeper</option>
-              <option value="safety_officer">Safety Officer</option>
-              <option value="mark_layer">Mark Layer</option>
-            </select>
-          </label>
-          <label>Coverage
-            <select id="dutyFilterCoverage">
-              <option value="all">All races</option>
-              <option value="needs_coverage">Needs race officer</option>
-              <option value="covered">Has race officer</option>
-            </select>
-          </label>
-          <label>Search
-            <input type="text" id="dutyFilterSearch" placeholder="Search sailor, race, series">
-          </label>
-        </div>
-
-        <div id="dutyStatusMessage" class="muted" style="margin-bottom:10px;"></div>
-
-        <div class="duty-unassigned">
-          <h4 style="margin:0 0 8px; color:#1331C5;">Coverage Snapshot (Upcoming Races)</h4>
-          <table class="dash-table"><thead><tr><th>Race</th><th>Series</th><th>Start</th><th>Coverage</th><th>Quick Action</th></tr></thead><tbody id="dutyUnassignedRows"></tbody></table>
-        </div>
-
-        <table class="dash-table" style="margin-top:12px;"><thead><tr><th>Race</th><th>Series</th><th>Start</th><th>Sailor</th><th>Duty</th><th>Status</th><th>Mobile</th><th>Action</th></tr></thead><tbody id="dutyRows"></tbody></table>
       </div>
-    </section>
-
-    <section id="view-review" class="dash-card hidden">
-      <h3>Results Review Queue</h3>
       <div class="dash-body">
-        <table class="dash-table"><thead><tr><th>Race</th><th>Series</th><th>Start</th><th>Results</th><th>Entries</th><th>Finishes</th><th>Actions</th></tr></thead><tbody id="reviewRows"></tbody></table>
+        <p class="muted" style="margin:0 0 14px;">Only past races are shown here. Review results, import paper or CSV data, then approve selected races.</p>
+
+        <form id="raceApprovalForm">
+          <table class="dash-table">
+            <thead>
+              <tr>
+                <th>Select</th>
+                <th>Race</th>
+                <th>Series</th>
+                <th>Start</th>
+                <th>Results</th>
+                <th>Entries</th>
+                <th>Finishes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="raceQueueRows"></tbody>
+          </table>
+          <div style="margin-top:12px; text-align:right;">
+            <button type="submit" class="dash-nav-btn">Approve Selected</button>
+          </div>
+        </form>
+        <div id="raceQueueStatus" class="muted" style="margin-top:8px;"></div>
+        <div id="raceWorkflowHint" class="muted" style="margin-top:16px; padding:10px 12px; background:#f8f9ff; border:1px solid #e6eaff; border-radius:8px;">
+          Use the Edit button on a pending race to open the CSV upload or manual entry workflow.
+        </div>
+
+        <div id="raceEditWorkflow" class="dash-card hidden" style="margin-top:18px;">
+          <div class="dash-card-header">
+            <h3 id="raceEditWorkflowTitle">Race Edit Workflow</h3>
+            <div class="dash-header-actions">
+              <div id="raceEditWorkflowMeta" class="muted"></div>
+              <button class="dash-nav-btn" id="closeRaceEditBtn" type="button">Close</button>
+            </div>
+          </div>
+          <div class="dash-body">
+            <div class="dash-controls">
+              <label>Selected Race ID <input type="number" id="importRaceId" min="1" readonly></label>
+              <label>Manual Entry Race ID <input type="number" id="manualRaceId" min="1" readonly></label>
+            </div>
+
+            <div class="dash-controls" style="margin-top:16px;">
+              <input type="file" id="importFile" accept=".csv,text/csv">
+              <button class="dash-nav-btn" id="previewImportBtn" type="button">Preview CSV</button>
+              <button class="dash-nav-btn" id="applyImportBtn" type="button">Apply to Selected Race</button>
+            </div>
+            <div id="importStatus" class="muted"></div>
+            <table class="dash-table" style="margin-top:10px;"><thead><tr><th>Sailor</th><th>Boat</th><th>Sail #</th><th>Elapsed</th><th>Corrected</th><th>Pos</th><th>DNF</th></tr></thead><tbody id="importRows"></tbody></table>
+
+            <div style="margin-top:24px; border-top:1px solid #eef1ff; padding-top:18px;">
+              <h4 style="margin:0 0 12px; color:#1331C5;">Manual Input for the Selected Race</h4>
+              <p class="muted" style="margin:0 0 10px;">Enter sailor, boat, sail number, laps, and elapsed time. Handicap, corrected time, and finishing order will be generated by the app.</p>
+              <div class="dash-controls">
+                <label>Sailor
+                  <select id="manualSailor">
+                    <option value="">Select sailor...</option>
+                  </select>
+                </label>
+                <label>Boat
+                  <select id="manualBoat" disabled>
+                    <option value="">Select boat...</option>
+                  </select>
+                </label>
+                <label>Sail No
+                  <input type="text" id="manualSailNumber" placeholder="Sail number">
+                </label>
+                <label>Laps
+                  <input type="number" id="manualLaps" min="1" value="1" placeholder="Laps">
+                </label>
+                <label>Elapsed
+                  <input type="text" id="manualElapsed" placeholder="HH:MM:SS">
+                </label>
+                <button class="dash-nav-btn" id="addManualEntryBtn" type="button">Add Row</button>
+              </div>
+              <div class="dash-controls">
+                <button class="dash-nav-btn" id="saveManualRaceBtn" type="button">Save Manual Entries</button>
+                <button class="dash-nav-btn" id="clearManualEntriesBtn" type="button">Clear Rows</button>
+              </div>
+              <div id="manualImportStatus" class="muted"></div>
+              <table class="dash-table" style="margin-top:10px;"><thead><tr><th>Sailor</th><th>Boat</th><th>Sail #</th><th>Laps</th><th>Elapsed</th><th>Corrected</th></tr></thead><tbody id="manualEntryRows"></tbody></table>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -233,106 +192,11 @@
       <div class="dash-body">
         <div class="dash-controls">
           <label>Race ID <input type="number" id="exportRaceId" min="1" placeholder="e.g. 101"></label>
-          <button class="dash-nav-btn" id="exportResultsBtn">Download Results CSV</button>
+          <button class="dash-nav-btn" id="exportResultsBtn" type="button">Download Results CSV</button>
         </div>
         <div id="exportStatus" class="muted"></div>
       </div>
     </section>
-
-    <section id="view-imports" class="dash-card hidden">
-      <h3>Imports from Paper / CSV</h3>
-      <div class="dash-body">
-        <div style="margin-bottom:24px; border-bottom:1px solid #eef1ff; padding-bottom:18px;">
-          <h4 style="margin:0 0 12px; color:#1331C5;">Dedicated Retrospective Results Workflow</h4>
-          <p class="muted" style="margin:0 0 10px;">
-            Step 1: create/select race → Step 2: import/add draft entries → Step 3: preview standings → Step 4: publish.
-          </p>
-          <div class="dash-controls">
-            <label>From <input type="date" id="retrospectiveFrom"></label>
-            <label>To <input type="date" id="retrospectiveTo"></label>
-            <label>Series <select id="retrospectiveSeries"><option value="">All series</option></select></label>
-            <button class="dash-nav-btn" id="reloadRetrospectiveBtn">Reload Races</button>
-          </div>
-          <table class="dash-table" style="margin-top:8px;">
-            <thead>
-              <tr><th>Race ID</th><th>Series</th><th>Race</th><th>Start</th><th>Status</th><th>Results</th><th>Source</th><th>Actions</th></tr>
-            </thead>
-            <tbody id="retrospectiveRows"></tbody>
-          </table>
-
-          <div class="dash-controls" style="margin-top:14px;">
-            <label>Selected Race ID <input type="number" id="workflowRaceId" min="1" placeholder="Select from list or type"></label>
-            <button class="dash-nav-btn" id="previewRetrospectiveBtn">Preview Standings</button>
-            <button class="dash-nav-btn" id="publishRetrospectiveBtn">Approve / Publish</button>
-          </div>
-          <div id="retrospectiveStatus" class="muted"></div>
-
-          <table class="dash-table" style="margin-top:10px;">
-            <thead><tr><th>Sailor</th><th>Boat</th><th>Sail #</th><th>Elapsed</th><th>Corrected</th><th>Pos</th><th>DNF</th></tr></thead>
-            <tbody id="retrospectivePreviewRows"></tbody>
-          </table>
-        </div>
-
-        <div class="dash-controls">
-          <input type="file" id="importFile" accept=".csv,text/csv">
-          <button class="dash-nav-btn" id="previewImportBtn">Preview CSV</button>
-          <label>Apply to Race ID <input type="number" id="importRaceId" min="1" placeholder="e.g. 101"></label>
-          <button class="dash-nav-btn" id="applyImportBtn">Apply to Race</button>
-        </div>
-        <div id="importStatus" class="muted"></div>
-        <table class="dash-table" style="margin-top:10px;"><thead><tr><th>Sailor</th><th>Boat</th><th>Sail #</th><th>Elapsed</th><th>Corrected</th><th>Pos</th><th>DNF</th></tr></thead><tbody id="importRows"></tbody></table>
-
-        <div style="margin-top:24px; border-top:1px solid #eef1ff; padding-top:18px;">
-          <h4 style="margin:0 0 12px; color:#1331C5;">Manual Input for Hand-Captured Races</h4>
-          <div class="dash-controls">
-            <label>Existing Race ID <input type="number" id="manualRaceId" min="1" placeholder="Use existing race"></label>
-            <label>Series <select id="manualSeriesId"><option value="">Select series...</option></select></label>
-            <label>Race No <input type="number" id="manualRaceNo" min="1" placeholder="Optional"></label>
-            <label>Start <input type="datetime-local" id="manualStartedAt"></label>
-            <label>End <input type="datetime-local" id="manualEndedAt"></label>
-          </div>
-          <div class="dash-controls">
-            <input type="text" id="manualSailor" placeholder="Sailor name">
-            <input type="text" id="manualBoat" placeholder="Boat class/name">
-            <input type="text" id="manualSailNumber" placeholder="Sail number">
-            <input type="number" id="manualHandicap" placeholder="Handicap">
-            <input type="text" id="manualElapsed" placeholder="Elapsed HH:MM:SS">
-            <input type="text" id="manualCorrected" placeholder="Corrected HH:MM:SS">
-            <input type="number" id="manualPosition" min="1" placeholder="Position">
-            <label style="display:flex; align-items:center; gap:6px;">DNF <input type="checkbox" id="manualDnf"></label>
-            <button class="dash-nav-btn" id="addManualEntryBtn">Add Row</button>
-          </div>
-          <div class="dash-controls">
-            <button class="dash-nav-btn" id="saveManualRaceBtn">Create / Save Manual Race</button>
-            <button class="dash-nav-btn" id="clearManualEntriesBtn">Clear Rows</button>
-          </div>
-          <div id="manualImportStatus" class="muted"></div>
-          <table class="dash-table" style="margin-top:10px;"><thead><tr><th>Sailor</th><th>Boat</th><th>Sail #</th><th>HC</th><th>Elapsed</th><th>Corrected</th><th>Pos</th><th>DNF</th></tr></thead><tbody id="manualEntryRows"></tbody></table>
-        </div>
-      </div>
-    </section>
-
-
-  </div>
-
-  <div id="dutyConflictModal" class="duty-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="dutyConflictTitle">
-    <div class="duty-modal">
-      <div class="duty-modal-head">
-        <span id="dutyConflictTitle">Potential Duty Conflicts</span>
-        <button class="dash-nav-btn" id="dutyConflictCloseBtn" style="padding:4px 8px;">Close</button>
-      </div>
-      <div class="duty-modal-body">
-        <div id="dutyConflictIntro" class="muted" style="margin-bottom:10px;"></div>
-        <table class="dash-table">
-          <thead><tr><th>Type</th><th>Race</th><th>Series</th><th>Start</th><th>Status</th><th>Duty</th></tr></thead>
-          <tbody id="dutyConflictRows"></tbody>
-        </table>
-      </div>
-      <div class="duty-modal-foot">
-        <button class="dash-nav-btn" id="dutyConflictCancelBtn">Cancel</button>
-        <button class="dash-nav-btn" id="dutyConflictConfirmBtn">Assign Anyway</button>
-      </div>
-    </div>
   </div>
 
   <script src="{{ url_for('static', filename='js/club_dashboard.js') }}"></script>

@@ -121,6 +121,24 @@ Priority levels:
 	- [ ] Re-use the existing `/api/dashboard/exports/results.csv` endpoint with the race ID pre-filled
 	- [ ] Trigger download inline without navigating away from the review queue
 
+- [ ] Combined Race Queue (Results Review + Imports) UI/UX improvements
+	- [ ] Add a “Select All” checkbox in the table header for bulk selection
+	- [ ] Show a loading spinner or animation while races are loading or being approved
+	- [ ] Display a toast or popup for success/failure, not just a muted message below the table
+	- [ ] Make table headers sticky for long lists
+	- [ ] Add sorting by clicking on column headers (e.g., by date, series, race number)
+	- [ ] Use alternating row colors for readability
+	- [ ] Disable the “Approve Selected” button if no races are selected
+	- [ ] Add a confirmation dialog before approving races
+	- [ ] Add a search box to filter races by series, race number, or date
+	- [ ] Allow filtering by “All”, “Unapproved”, and “Approved” with clear tab-like buttons
+	- [ ] Add a “View Details” or “Summary” button for each race
+	- [ ] Open race details in a modal or side panel for quick review without leaving the page
+	- [ ] Ensure all buttons and checkboxes are keyboard accessible and have clear focus states
+	- [ ] Add ARIA labels for screen readers
+	- [ ] Use color coding for race status (e.g., green for approved, yellow for pending)
+	- [ ] Add subtle hover effects on rows and buttons for better interactivity
+
 ### Web — Landing Page UX/UI
 - [ ] Fix race setup flow consistency and remove broken/missing field dependencies
 	- [ ] Resolve `goRace` dependency on missing `raceNo` field and align required inputs with rendered form

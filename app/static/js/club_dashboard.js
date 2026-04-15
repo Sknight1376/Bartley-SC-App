@@ -1,10 +1,8 @@
-(function () {
-  const views = ["sailors", "calendar", "duties", "review", "handicap", "exports", "imports"];
+﻿(function () {
+  const views = ["sailors", "calendar", "imports", "handicap", "exports"];
   const manualEntries = [];
-  let dutyMembers = [];
-  let dutyAssignableRaces = [];
-  let dutyRosterRows = [];
-  let pendingDutyAssignment = null;
+  let showingApprovedQueue = false;
+  let sailorDirectory = [];
 
   function esc(v) {
     return String(v ?? "")
@@ -22,71 +20,42 @@
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
   }
 
-  function normalizeRoleCode(value) {
-    const v = String(value || "").trim().toLowerCase();
-    return v || "race_officer";
+  function parseHmsToSeconds(raw) {
+    const parts = String(raw || "").trim().split(":").map((p) => Number(p));
+    if (parts.length !== 3 || parts.some((p) => Number.isNaN(p))) return null;
+    return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
   }
 
-  function roleLabel(value) {
-    const code = normalizeRoleCode(value);
-    const labels = {
-      race_officer: "Race Officer",
-      assistant_race_officer: "Assistant Race Officer",
-      timekeeper: "Timekeeper",
-      safety_officer: "Safety Officer",
-      mark_layer: "Mark Layer",
-    };
-    return labels[code] || code.replaceAll("_", " ");
+  function secsToHms(totalSeconds) {
+    if (totalSeconds == null || Number.isNaN(totalSeconds)) return "";
+    const s = Math.round(Number(totalSeconds));
+    const hh = String(Math.floor(s / 3600)).padStart(2, "0");
+    const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+    const ss = String(s % 60).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
   }
 
-  function isMobileEligible(roleCode, status) {
-    return normalizeRoleCode(roleCode) === "race_officer" && String(status || "").toLowerCase() === "assigned";
+  function calcCorrectedTime(elapsedTime, handicap) {
+    const elapsedSec = parseHmsToSeconds(elapsedTime);
+    const hc = Number(handicap);
+    if (elapsedSec == null || !hc) return "";
+    return secsToHms(Math.round((elapsedSec * 1000) / hc));
   }
 
-  function mobileChip(roleCode, status) {
-    if (isMobileEligible(roleCode, status)) {
-      return '<span class="duty-chip duty-chip-mobile-ok">Mobile Enabled</span>';
-    }
-    return '<span class="duty-chip duty-chip-mobile-warn">Not Mobile Enabled</span>';
+  function calcProjectedTime(timeValue, lapCount = 1, targetLapCount = 1) {
+    const baseSeconds = typeof timeValue === "number" ? timeValue : parseHmsToSeconds(timeValue);
+    const laps = Math.max(Number(lapCount) || 1, 1);
+    const targetLaps = Math.max(Number(targetLapCount) || laps, laps);
+    if (baseSeconds == null || Number.isNaN(baseSeconds)) return "";
+    return secsToHms(Math.round((baseSeconds * targetLaps) / laps));
   }
 
-  function statusChip(status) {
-    const s = String(status || "assigned").toLowerCase();
-    const cls = s === "confirmed" ? "duty-chip-confirmed" : s === "completed" ? "duty-chip-completed" : "duty-chip-assigned";
-    return `<span class="duty-chip ${cls}">${esc(s)}</span>`;
-  }
-
-  function raceTimingHint(startedAt) {
-    if (!startedAt) return "No scheduled start";
-    const start = new Date(startedAt);
-    if (Number.isNaN(start.getTime())) return "";
-    const now = new Date();
-    const diffMs = start.getTime() - now.getTime();
-    const absMin = Math.round(Math.abs(diffMs) / 60000);
-    const hours = Math.floor(absMin / 60);
-    const minutes = absMin % 60;
-    const part = hours ? `${hours}h ${minutes}m` : `${minutes}m`;
-    if (diffMs > 0) return `Starts in ${part}`;
-    if (diffMs < 0) return `Started ${part} ago`;
-    return "Starting now";
-  }
-
-  function setDutyStatus(message, level = "info") {
-    const node = document.getElementById("dutyStatusMessage");
-    if (!node) return;
-    node.textContent = message || "";
-    node.style.color = level === "error" ? "#991b1b" : level === "success" ? "#166534" : "#6b7280";
-  }
-
-  function openDutyConflictModal() {
-    const modal = document.getElementById("dutyConflictModal");
-    if (modal) modal.classList.add("open");
-  }
-
-  function closeDutyConflictModal() {
-    const modal = document.getElementById("dutyConflictModal");
-    if (modal) modal.classList.remove("open");
-    pendingDutyAssignment = null;
+  function getManualTargetLaps(extraLapCount = 1) {
+    const lapValues = [
+      Number(extraLapCount) || 1,
+      ...manualEntries.map((entry) => Math.max(Number(entry.lap_number) || 1, 1)),
+    ].filter((value) => value > 0);
+    return Math.max(1, ...lapValues);
   }
 
   function setActiveView(view) {
@@ -136,10 +105,181 @@
     return data;
   }
 
+  function isPast(dateStr) {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return !Number.isNaN(d.getTime()) && d < new Date();
+  }
+
+  function openRaceEditWorkflow(raceId, raceNo) {
+    const panel = document.getElementById("raceEditWorkflow");
+    const hint = document.getElementById("raceWorkflowHint");
+    const title = document.getElementById("raceEditWorkflowTitle");
+    const meta = document.getElementById("raceEditWorkflowMeta");
+    const previousRaceId = document.getElementById("manualRaceId")?.value || "";
+
+    if (previousRaceId !== String(raceId)) {
+      manualEntries.length = 0;
+      renderManualEntries();
+      const importRows = document.getElementById("importRows");
+      if (importRows) importRows.innerHTML = "";
+      const fileInput = document.getElementById("importFile");
+      if (fileInput) fileInput.value = "";
+      const importStatus = document.getElementById("importStatus");
+      const manualStatus = document.getElementById("manualImportStatus");
+      if (importStatus) importStatus.textContent = "";
+      if (manualStatus) manualStatus.textContent = "";
+      const sailorSelect = document.getElementById("manualSailor");
+      const sailNumberInput = document.getElementById("manualSailNumber");
+      const lapsInput = document.getElementById("manualLaps");
+      const elapsedInput = document.getElementById("manualElapsed");
+      if (sailorSelect) sailorSelect.value = "";
+      if (sailNumberInput) sailNumberInput.value = "";
+      if (lapsInput) lapsInput.value = "1";
+      if (elapsedInput) elapsedInput.value = "";
+      populateManualBoatOptions();
+    }
+
+    setWorkflowRaceId(raceId);
+    if (title) title.textContent = `Race Edit Workflow — Race #${raceNo || raceId}`;
+    if (meta) meta.textContent = `Race ID ${raceId}`;
+    if (hint) hint.classList.add("hidden");
+    if (panel) panel.classList.remove("hidden");
+    panel?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function closeRaceEditWorkflow() {
+    const panel = document.getElementById("raceEditWorkflow");
+    const hint = document.getElementById("raceWorkflowHint");
+    if (panel) panel.classList.add("hidden");
+    if (hint) hint.classList.remove("hidden");
+  }
+
+  function renderRaceQueueRows(races, showApproved) {
+    const rows = document.getElementById("raceQueueRows");
+    if (!rows) return;
+    rows.innerHTML = races.map((r) => {
+      const selectCell = showApproved
+        ? '<span class="muted">—</span>'
+        : `<input type="checkbox" name="raceSelect" value="${esc(r.race_id)}">`;
+
+      const editAction = showApproved
+        ? ""
+        : `<button class="dash-nav-btn" type="button" style="padding:3px 8px;" data-edit-race="${esc(r.race_id)}" data-edit-race-no="${esc(r.race_no)}">Edit</button>`;
+
+      return `
+      <tr>
+        <td>${selectCell}</td>
+        <td>#${esc(r.race_no)}</td>
+        <td>${esc(r.series_name)}</td>
+        <td>${fmtDateTime(r.started_at)}</td>
+        <td>${esc(r.results_status || "draft")}</td>
+        <td>${esc(r.entry_count ?? "")}</td>
+        <td>${esc(r.finish_count ?? "")}</td>
+        <td style="white-space:nowrap;">
+          <a href="/race_summary?race_id=${encodeURIComponent(r.race_id)}" style="margin-right:6px;">View</a>
+          ${editAction}
+        </td>
+      </tr>
+    `;
+    }).join("") || `<tr><td colspan="8" class="muted">No races found for this filter.</td></tr>`;
+
+    rows.querySelectorAll("button[data-edit-race]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const raceId = btn.getAttribute("data-edit-race");
+        const raceNo = btn.getAttribute("data-edit-race-no") || raceId;
+        setActiveView("imports");
+        openRaceEditWorkflow(raceId, raceNo);
+      });
+    });
+  }
+
+  async function loadRaceQueue(showApproved = false) {
+    showingApprovedQueue = showApproved;
+    const statusEl = document.getElementById("raceQueueStatus");
+    const rows = document.getElementById("raceQueueRows");
+    if (!statusEl || !rows) return;
+    statusEl.textContent = "Loading race queue...";
+
+    try {
+      if (!showApproved) {
+        const data = await getJson("/api/dashboard/results-review-queue");
+        const races = (data.queue || []).filter((r) => isPast(r.started_at));
+        renderRaceQueueRows(races, false);
+        statusEl.textContent = races.length ? `Showing ${races.length} unapproved past race(s).` : "No past races are awaiting approval.";
+      } else {
+        const data = await getJson("/api/dashboard/race-calendar?from_date=2000-01-01&to_date=2100-01-01&limit=500");
+        const races = (data.races || []).filter((r) => isPast(r.started_at) && String(r.results_status || "").toLowerCase() === "locked");
+        renderRaceQueueRows(races, true);
+        statusEl.textContent = races.length ? `Showing ${races.length} approved past race(s).` : "No approved races found in this range.";
+      }
+    } catch (e) {
+      rows.innerHTML = `<tr><td colspan="8" class="muted">Failed to load races.</td></tr>`;
+      statusEl.textContent = e.message || "Failed to load race queue.";
+    }
+  }
+
+  async function approveSelectedRaces(e) {
+    e.preventDefault();
+    const form = document.getElementById("raceApprovalForm");
+    const statusEl = document.getElementById("raceQueueStatus");
+    if (!form || !statusEl) return;
+
+    const selected = Array.from(form.querySelectorAll("input[name='raceSelect']:checked")).map((cb) => cb.value);
+    if (!selected.length) {
+      statusEl.textContent = "Select at least one race to approve.";
+      return;
+    }
+
+    statusEl.textContent = `Approving ${selected.length} race(s)...`;
+    let success = 0;
+    let fail = 0;
+
+    for (const raceId of selected) {
+      try {
+        await postJson(`/api/races/${encodeURIComponent(raceId)}/results/lock`, {});
+        success += 1;
+      } catch (err) {
+        fail += 1;
+      }
+    }
+
+    statusEl.textContent = `Approved ${success} race(s)${fail ? `, ${fail} failed` : ""}.`;
+    await loadRaceQueue(false);
+  }
+
+  function populateManualSailorOptions() {
+    const sailorSelect = document.getElementById("manualSailor");
+    if (!sailorSelect) return;
+    sailorSelect.innerHTML = '<option value="">Select sailor...</option>' + sailorDirectory.map((s) =>
+      `<option value="${esc(s.sailor_id)}">${esc(s.name)}</option>`
+    ).join("");
+  }
+
+  function populateManualBoatOptions() {
+    const sailorSelect = document.getElementById("manualSailor");
+    const boatSelect = document.getElementById("manualBoat");
+    const sailNumberInput = document.getElementById("manualSailNumber");
+    if (!boatSelect) return;
+
+    const sailorId = sailorSelect?.value || "";
+    const sailor = sailorDirectory.find((s) => String(s.sailor_id) === String(sailorId));
+    const boats = sailor?.boats || [];
+
+    boatSelect.innerHTML = '<option value="">Select boat...</option>' + boats.map((b) =>
+      `<option value="${esc(b.boatkey || "")}" data-boat-class="${esc(b.boat_class || "")}" data-sail-number="${esc(b.sail_number || "")}" data-handicap="${esc(b.handicap || "")}">${esc(b.boat_class || "Boat")} · ${esc(b.sail_number || "No sail #")}</option>`
+    ).join("");
+    boatSelect.disabled = !boats.length;
+    if (sailNumberInput) sailNumberInput.value = "";
+  }
+
   async function loadSailorsBoats() {
     const data = await getJson("/api/dashboard/sailors-boats");
     const sailorsRows = document.getElementById("sailorsRows");
     const boatClassRows = document.getElementById("boatClassRows");
+    sailorDirectory = data.sailors || [];
+    populateManualSailorOptions();
+    populateManualBoatOptions();
 
     sailorsRows.innerHTML = (data.sailors || []).map((s) => `
       <tr>
@@ -175,302 +315,6 @@
         <td>${esc(r.results_status || "draft")}</td>
       </tr>
     `).join("") || `<tr><td colspan="5" class="muted">No races in range</td></tr>`;
-  }
-
-  function renderDutyCoverageSnapshot() {
-    const tbody = document.getElementById("dutyUnassignedRows");
-    if (!tbody) return;
-
-    const filterCoverage = (document.getElementById("dutyFilterCoverage")?.value || "all").trim();
-    const coveredRaceIds = new Set(
-      dutyRosterRows
-        .filter((d) => normalizeRoleCode(d.role_code || d.duty_type) === "race_officer" && ["assigned", "confirmed"].includes(String(d.status || "").toLowerCase()))
-        .map((d) => String(d.race_id))
-    );
-
-    const rows = dutyAssignableRaces
-      .map((r) => {
-        const covered = coveredRaceIds.has(String(r.race_id));
-        return { ...r, covered };
-      })
-      .filter((r) => filterCoverage === "all" || (filterCoverage === "covered" ? r.covered : !r.covered));
-
-    tbody.innerHTML = rows.map((r) => `
-      <tr>
-        <td>#${esc(r.race_no)}</td>
-        <td>${esc(r.series_name)}</td>
-        <td>${fmtDateTime(r.started_at)}<div class="duty-inline-note">${esc(raceTimingHint(r.started_at))}</div></td>
-        <td>${r.covered ? '<span class="duty-chip duty-chip-confirmed">Covered</span>' : '<span class="duty-chip duty-chip-mobile-warn">Needs Race Officer</span>'}</td>
-        <td>
-          ${r.covered ? "" : `<button class="dash-nav-btn" style="padding:4px 8px;" data-quick-assign-date="${esc(r.started_at ? r.started_at.substring(0, 10) : '')}">Assign Race Officer</button>`}
-        </td>
-      </tr>
-    `).join("") || `<tr><td colspan="5" class="muted">No races in this coverage view.</td></tr>`;
-
-    tbody.querySelectorAll("button[data-quick-assign-date]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const raceDate = btn.getAttribute("data-quick-assign-date");
-        const dateInput = document.getElementById("dutyDate");
-        const roleSelect = document.getElementById("dutyRoleCode");
-        const statusSelect = document.getElementById("dutyStatus");
-        if (dateInput) dateInput.value = raceDate;
-        if (roleSelect) roleSelect.value = "race_officer";
-        if (statusSelect) statusSelect.value = "assigned";
-        applyMobileModeForSelects("dutyRoleCode", "dutyStatus", "dutyMobileFirst", "dutyEligibilityHint");
-        setDutyStatus("Date selected. Choose a member and click Assign Member.");
-      });
-    });
-  }
-
-  function renderDutyRows() {
-    const rowsNode = document.getElementById("dutyRows");
-    if (!rowsNode) return;
-
-    const filterStatus = (document.getElementById("dutyFilterStatus")?.value || "all").trim();
-    const filterRole = normalizeRoleCode(document.getElementById("dutyFilterRole")?.value || "all");
-    const filterSearch = (document.getElementById("dutyFilterSearch")?.value || "").trim().toLowerCase();
-
-    const filtered = dutyRosterRows.filter((d) => {
-      const statusOk = filterStatus === "all" || String(d.status || "").toLowerCase() === filterStatus;
-      const roleOk = filterRole === "all" || normalizeRoleCode(d.role_code || d.duty_type) === filterRole;
-      const haystack = `${d.sailor_name || ""} ${d.series_name || ""} ${d.race_no || ""} ${d.duty_type || d.role_code || ""}`.toLowerCase();
-      const searchOk = !filterSearch || haystack.includes(filterSearch);
-      return statusOk && roleOk && searchOk;
-    });
-
-    rowsNode.innerHTML = filtered.map((d) => {
-      const roleCode = normalizeRoleCode(d.role_code || d.duty_type);
-      return `
-        <tr>
-          <td>#${esc(d.race_no)}</td>
-          <td>${esc(d.series_name)}</td>
-          <td>${fmtDateTime(d.started_at)}<div class="duty-inline-note">${esc(raceTimingHint(d.started_at))}</div></td>
-          <td>${esc(d.sailor_name)}</td>
-          <td>${esc(roleLabel(roleCode))}</td>
-          <td>${statusChip(d.status)}</td>
-          <td>${mobileChip(roleCode, d.status)}</td>
-          <td>
-            <button class="dash-nav-btn" style="padding:4px 8px;" data-copy-duty="${esc(d.duty_id)}" data-race-no="${esc(d.race_no)}" data-series-name="${esc(d.series_name)}" data-sailor-name="${esc(d.sailor_name)}">Copy Mobile Steps</button>
-            <button class="dash-nav-btn" style="padding:4px 8px; margin-left:6px;" data-delete-duty="${esc(d.duty_id)}" data-delete-race="${esc(d.race_id)}">Remove</button>
-          </td>
-        </tr>
-      `;
-    }).join("") || `<tr><td colspan="8" class="muted">No duty assignments match the current filters.</td></tr>`;
-
-    rowsNode.querySelectorAll("button[data-delete-duty]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const dutyId = btn.getAttribute("data-delete-duty");
-        const raceId = btn.getAttribute("data-delete-race");
-        try {
-          await deleteJson(`/api/races/${encodeURIComponent(raceId)}/duties/${encodeURIComponent(dutyId)}`);
-          setDutyStatus("Duty assignment removed.", "success");
-          await Promise.all([loadDuties(), loadDutyControls()]);
-        } catch (e) {
-          setDutyStatus(e.message || "Failed to remove duty assignment.", "error");
-        }
-      });
-    });
-
-    rowsNode.querySelectorAll("button[data-copy-duty]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const text = [
-          `Race duty assigned: ${btn.getAttribute("data-series-name")} race #${btn.getAttribute("data-race-no")}`,
-          `Member: ${btn.getAttribute("data-sailor-name")}`,
-          "In the Sailor app, open Race Control > Upcoming Races to access your assigned duty race.",
-        ].join("\n");
-        try {
-          if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(text);
-            setDutyStatus("Mobile handoff steps copied to clipboard.", "success");
-          } else {
-            setDutyStatus(text, "info");
-          }
-        } catch (e) {
-          setDutyStatus("Unable to copy. " + text, "info");
-        }
-      });
-    });
-
-    renderDutyCoverageSnapshot();
-  }
-
-  async function loadDuties() {
-    const data = await getJson("/api/dashboard/duty-roster");
-    dutyRosterRows = data.duties || [];
-    renderDutyRows();
-  }
-
-  function populateDutyControls() {
-    const dateInput = document.getElementById("dutyDate");
-    const sailorSelect = document.getElementById("dutySailorId");
-    if (!sailorSelect) return;
-
-    if (dateInput && !dateInput.value) {
-      const today = new Date();
-      dateInput.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-    }
-
-    const sailorOptions = dutyMembers.map((m) => `<option value="${esc(m.id)}">${esc(m.full_name)}</option>`).join("");
-    sailorSelect.innerHTML = `<option value="">Select member...</option>${sailorOptions}`;
-
-    renderDutyCoverageSnapshot();
-  }
-
-  async function loadDutyControls() {
-    const today = new Date();
-    const fromDate = new Date(today);
-    fromDate.setDate(fromDate.getDate() - 14);
-    const toDate = new Date(today);
-    toDate.setDate(toDate.getDate() + 120);
-    const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const qs = new URLSearchParams({ from_date: toIso(fromDate), to_date: toIso(toDate) });
-
-    const [calendarData, membersData] = await Promise.all([
-      getJson(`/api/dashboard/race-calendar?${qs.toString()}`),
-      getJson("/api/members"),
-    ]);
-
-    dutyAssignableRaces = (calendarData.races || []).map((r) => ({
-      race_id: r.race_id,
-      race_no: r.race_no,
-      series_name: r.series_name,
-      started_at: r.started_at,
-    }));
-    dutyMembers = (membersData.members || []).slice().sort((a, b) => String(a.full_name || "").localeCompare(String(b.full_name || "")));
-    populateDutyControls();
-    renderDutyCoverageSnapshot();
-  }
-
-  function updateDutyEligibilityHint() {
-    const node = document.getElementById("dutyEligibilityHint");
-    if (!node) return;
-    const roleCode = (document.getElementById("dutyRoleCode")?.value || "race_officer").trim();
-    const status = (document.getElementById("dutyStatus")?.value || "assigned").trim();
-    if (isMobileEligible(roleCode, status)) {
-      node.innerHTML = 'This assignment will <strong>enable mobile race control access</strong> for the selected member.';
-      node.style.color = "#166534";
-    } else {
-      node.innerHTML = 'Mobile control access requires <strong>Race Officer</strong> role with <strong>Assigned</strong> status.';
-      node.style.color = "#92400e";
-    }
-  }
-
-  function applyMobileModeForSelects(roleSelectId, statusSelectId, modeToggleId, hintId) {
-    const roleSelect = document.getElementById(roleSelectId);
-    const statusSelect = document.getElementById(statusSelectId);
-    const modeToggle = document.getElementById(modeToggleId);
-    const hintNode = hintId ? document.getElementById(hintId) : null;
-    if (!roleSelect || !statusSelect || !modeToggle) return;
-
-    const mobileMode = !!modeToggle.checked;
-
-    Array.from(roleSelect.options).forEach((opt) => {
-      opt.disabled = mobileMode && String(opt.value) !== "race_officer";
-    });
-    Array.from(statusSelect.options).forEach((opt) => {
-      opt.disabled = mobileMode && String(opt.value) !== "assigned";
-    });
-
-    if (mobileMode) {
-      roleSelect.value = "race_officer";
-      statusSelect.value = "assigned";
-      if (hintNode) {
-        hintNode.innerHTML = 'Mobile-enabled mode is ON. Role/status are locked to <strong>Race Officer</strong> and <strong>Assigned</strong>.';
-        hintNode.style.color = "#166534";
-      }
-    } else if (hintNode) {
-      const roleCode = (roleSelect.value || "").trim();
-      const statusValue = (statusSelect.value || "").trim();
-      if (isMobileEligible(roleCode, statusValue)) {
-        hintNode.innerHTML = 'This assignment will <strong>enable mobile race control access</strong> for the selected member.';
-        hintNode.style.color = "#166534";
-      } else {
-        hintNode.innerHTML = 'Mobile control access requires <strong>Race Officer</strong> role with <strong>Assigned</strong> status.';
-        hintNode.style.color = "#92400e";
-      }
-    }
-  }
-
-  function getDutyConflicts(date, sailorId) {
-    const conflicts = [];
-    dutyRosterRows
-      .filter((d) => String(d.sailor) === String(sailorId) && d.started_at && d.started_at.substring(0, 10) === date)
-      .forEach((d) => {
-        conflicts.push({
-          type: "Same-day assignment",
-          race_no: d.race_no,
-          series_name: d.series_name,
-          started_at: d.started_at,
-          status: d.status,
-          duty: roleLabel(d.role_code || d.duty_type),
-        });
-      });
-    return conflicts;
-  }
-
-  function showDutyConflicts(conflicts, date, sailorId) {
-    const tbody = document.getElementById("dutyConflictRows");
-    const intro = document.getElementById("dutyConflictIntro");
-    const sailor = dutyMembers.find((m) => String(m.id) === String(sailorId));
-    if (!tbody || !intro) return;
-
-    intro.textContent = `Review ${conflicts.length} potential conflict(s) before assigning ${sailor?.full_name || "this member"} to all races on ${date}.`;
-    tbody.innerHTML = conflicts.map((c) => `
-      <tr>
-        <td>${esc(c.type)}</td>
-        <td>#${esc(c.race_no || "-")}</td>
-        <td>${esc(c.series_name || "-")}</td>
-        <td>${fmtDateTime(c.started_at)}</td>
-        <td>${statusChip(c.status)}</td>
-        <td>${esc(c.duty || "-")}</td>
-      </tr>
-    `).join("");
-
-    openDutyConflictModal();
-  }
-
-  async function submitDutyAssignment(payload) {
-    await postJson(`/api/races/duties/by-date`, {
-      sailor_id: Number(payload.sailorId),
-      role_code: payload.roleCode,
-      duty_type: payload.roleCode,
-      status: payload.statusValue,
-      date: payload.date,
-    });
-
-    setDutyStatus(
-      isMobileEligible(payload.roleCode, payload.statusValue)
-        ? `Duty assignment saved for all races on ${payload.date} and mobile control access is enabled.`
-        : `Duty assignment saved for all races on ${payload.date}. This role/status will not unlock mobile race control.`,
-      "success"
-    );
-
-    await Promise.all([loadDuties(), loadDutyControls()]);
-  }
-
-  async function assignDuty() {
-    const date = (document.getElementById("dutyDate")?.value || "").trim();
-    const sailorId = (document.getElementById("dutySailorId")?.value || "").trim();
-    const roleCode = (document.getElementById("dutyRoleCode")?.value || "race_officer").trim();
-    const statusValue = (document.getElementById("dutyStatus")?.value || "assigned").trim();
-    if (!date || !sailorId) {
-      setDutyStatus("Select a date and member before assigning duty.", "error");
-      return;
-    }
-
-    const conflicts = getDutyConflicts(date, sailorId);
-    if (conflicts.length) {
-      pendingDutyAssignment = { date, sailorId, roleCode, statusValue };
-      showDutyConflicts(conflicts, date, sailorId);
-      setDutyStatus("Potential conflicts found. Review and confirm to continue.", "error");
-      return;
-    }
-
-    try {
-      await submitDutyAssignment({ date, sailorId, roleCode, statusValue });
-    } catch (e) {
-      setDutyStatus(e.message || "Failed to assign duty.", "error");
-    }
   }
 
   async function loadReviewQueue() {
@@ -520,8 +364,7 @@
       btn.addEventListener("click", () => {
         const raceId = btn.getAttribute("data-edit-race");
         setActiveView("imports");
-        setWorkflowRaceId(raceId);
-        previewRetrospective();
+        openRaceEditWorkflow(raceId, raceId);
       });
     });
   }
@@ -543,170 +386,84 @@
 
   async function loadSeriesOptions() {
     const select = document.getElementById("manualSeriesId");
-    const retrospectiveSeries = document.getElementById("retrospectiveSeries");
     if (!select) return;
     const data = await getJson("/api/series/manage");
     const options = (data.series || []).map((s) => `<option value="${esc(s.key || s.id)}">${esc(s.name)}${s.year ? ` (${esc(s.year)})` : ""}</option>`).join("");
     select.innerHTML = `<option value="">Select series...</option>${options}`;
-    if (retrospectiveSeries) {
-      retrospectiveSeries.innerHTML = `<option value="">All series</option>${options}`;
-    }
   }
 
   function setWorkflowRaceId(raceId) {
     const rid = raceId ? String(raceId) : "";
-    const workflow = document.getElementById("workflowRaceId");
     const manual = document.getElementById("manualRaceId");
     const importRace = document.getElementById("importRaceId");
-    if (workflow) workflow.value = rid;
     if (manual) manual.value = rid;
     if (importRace) importRace.value = rid;
-  }
-
-  async function loadRetrospectiveRaces() {
-    const status = document.getElementById("retrospectiveStatus");
-    const rows = document.getElementById("retrospectiveRows");
-    const from = document.getElementById("retrospectiveFrom")?.value || "";
-    const to = document.getElementById("retrospectiveTo")?.value || "";
-    const seriesId = document.getElementById("retrospectiveSeries")?.value || "";
-
-    const qs = new URLSearchParams();
-    if (from) qs.set("from_date", from);
-    if (to) qs.set("to_date", to);
-    if (seriesId) qs.set("series_id", seriesId);
-
-    try {
-      const data = await getJson(`/api/races/retrospective?${qs.toString()}`);
-      rows.innerHTML = (data.races || []).map((r) => `
-        <tr>
-          <td>${esc(r.key)}</td>
-          <td>${esc(r.series_name || r.series || "")}</td>
-          <td>#${esc(r.race_no)}</td>
-          <td>${fmtDateTime(r.started_at)}</td>
-          <td>${esc(r.status)}</td>
-          <td>${esc(r.results_status || "draft")}</td>
-          <td>${esc(r.source_mode || "retrospective")}</td>
-          <td>
-            <button class="dash-nav-btn" style="padding:4px 8px;" data-select-race="${esc(r.key)}">Select</button>
-            <a href="/race_summary?race_id=${encodeURIComponent(r.key)}" style="margin-left:6px;">Summary</a>
-            <a href="/api/races/${encodeURIComponent(r.key)}/audit" style="margin-left:6px;">Audit</a>
-            <a href="/api/races/${encodeURIComponent(r.key)}/revisions" style="margin-left:6px;">Revisions</a>
-          </td>
-        </tr>
-      `).join("") || `<tr><td colspan="8" class="muted">No retrospective races found for this filter.</td></tr>`;
-
-      rows.querySelectorAll("button[data-select-race]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          setWorkflowRaceId(btn.getAttribute("data-select-race"));
-          status.textContent = `Selected race ${btn.getAttribute("data-select-race")}.`;
-        });
-      });
-
-      status.textContent = `Loaded ${(data.races || []).length} retrospective race(s).`;
-    } catch (e) {
-      rows.innerHTML = `<tr><td colspan="8" class="muted">Failed to load races.</td></tr>`;
-      status.textContent = e.message || "Failed to load retrospective races.";
-    }
-  }
-
-  async function previewRetrospective() {
-    const raceId = (document.getElementById("workflowRaceId")?.value || "").trim();
-    const status = document.getElementById("retrospectiveStatus");
-    const rows = document.getElementById("retrospectivePreviewRows");
-
-    if (!raceId) {
-      status.textContent = "Select a race first.";
-      return;
-    }
-
-    try {
-      const data = await getJson(`/api/races/${encodeURIComponent(raceId)}/retrospective/preview`);
-      rows.innerHTML = (data.results || []).map((e) => `
-        <tr>
-          <td>${esc(e.sailor)}</td>
-          <td>${esc(e.boat)}</td>
-          <td>${esc(e.sail_number)}</td>
-          <td class="mono">${esc(e.elapsed_time || "")}</td>
-          <td class="mono">${esc(e.corrected_time || "")}</td>
-          <td>${esc(e.position || "")}</td>
-          <td>${e.dnf ? "YES" : ""}</td>
-        </tr>
-      `).join("") || `<tr><td colspan="7" class="muted">No results in draft for this race.</td></tr>`;
-      status.textContent = `Preview loaded for race ${raceId}. Results status: ${data.race?.results_status || "draft"}.`;
-    } catch (e) {
-      rows.innerHTML = `<tr><td colspan="7" class="muted">Preview failed.</td></tr>`;
-      status.textContent = e.message || "Failed to preview retrospective results.";
-    }
-  }
-
-  async function publishRetrospective() {
-    const raceId = (document.getElementById("workflowRaceId")?.value || "").trim();
-    const status = document.getElementById("retrospectiveStatus");
-    if (!raceId) {
-      status.textContent = "Select a race first.";
-      return;
-    }
-
-    try {
-      await postJson(`/api/races/${encodeURIComponent(raceId)}/results/publish`, {
-        reason: "Approved and published from Club Dashboard retrospective workflow",
-      });
-      status.textContent = `Race ${raceId} published successfully.`;
-      await loadRetrospectiveRaces();
-      await previewRetrospective();
-    } catch (e) {
-      status.textContent = e.message || "Failed to publish results.";
-    }
   }
 
   function renderManualEntries() {
     const rows = document.getElementById("manualEntryRows");
     if (!rows) return;
-    rows.innerHTML = manualEntries.map((e) => `
+    const targetLaps = getManualTargetLaps();
+    rows.innerHTML = manualEntries.map((e) => {
+      const actualCorrected = e.corrected_time || calcCorrectedTime(e.elapsed_time, e.handicap);
+      const projectedCorrected = calcProjectedTime(actualCorrected, e.lap_number || 1, targetLaps);
+      return `
       <tr>
         <td>${esc(e.sailor)}</td>
         <td>${esc(e.boat)}</td>
         <td>${esc(e.sailNumber)}</td>
-        <td>${esc(e.handicap || "")}</td>
+        <td>${esc(e.lap_number || 1)}</td>
         <td class="mono">${esc(e.elapsed_time || "")}</td>
-        <td class="mono">${esc(e.corrected_time || "")}</td>
-        <td>${esc(e.position || "")}</td>
-        <td>${e.dnf ? "YES" : ""}</td>
+        <td class="mono">${esc(projectedCorrected || actualCorrected || "")}</td>
       </tr>
-    `).join("") || `<tr><td colspan="8" class="muted">No manual rows added yet</td></tr>`;
+    `;
+    }).join("") || `<tr><td colspan="6" class="muted">No manual rows added yet</td></tr>`;
   }
 
   function addManualEntry() {
-    const sailor = (document.getElementById("manualSailor").value || "").trim();
-    const boat = (document.getElementById("manualBoat").value || "").trim();
+    const sailorSelect = document.getElementById("manualSailor");
+    const boatSelect = document.getElementById("manualBoat");
+    const sailor = sailorSelect?.options[sailorSelect.selectedIndex]?.text || "";
+    const boat = boatSelect?.options[boatSelect.selectedIndex]?.dataset?.boatClass || "";
+    const boatkey = boatSelect?.value || "";
+    const handicapRaw = boatSelect?.options[boatSelect.selectedIndex]?.dataset?.handicap || "";
     const sailNumber = (document.getElementById("manualSailNumber").value || "").trim();
-    const handicap = (document.getElementById("manualHandicap").value || "").trim();
+    const lapsRaw = (document.getElementById("manualLaps").value || "1").trim();
     const elapsed = (document.getElementById("manualElapsed").value || "").trim();
-    const corrected = (document.getElementById("manualCorrected").value || "").trim();
-    const position = (document.getElementById("manualPosition").value || "").trim();
-    const dnf = document.getElementById("manualDnf").checked;
     const status = document.getElementById("manualImportStatus");
+    const lapNumber = Number(lapsRaw || 1);
 
-    if (!sailor || !boat || !sailNumber) {
-      status.textContent = "Sailor, boat, and sail number are required.";
+    if (!sailorSelect?.value || !boatSelect?.value || !sailNumber || !elapsed) {
+      status.textContent = "Choose sailor and boat, then enter sail number, laps, and elapsed time.";
       return;
     }
+    if (!Number.isInteger(lapNumber) || lapNumber < 1) {
+      status.textContent = "Laps must be a whole number of 1 or more.";
+      return;
+    }
+
+    const handicap = handicapRaw ? Number(handicapRaw) : undefined;
+    const correctedTime = calcCorrectedTime(elapsed, handicap);
 
     manualEntries.push({
       sailor,
       boat,
       sailNumber,
-      handicap: handicap ? Number(handicap) : undefined,
-      elapsed_time: elapsed || undefined,
-      corrected_time: corrected || undefined,
-      position: position ? Number(position) : undefined,
-      dnf,
+      boatkey: boatkey ? Number(boatkey) : undefined,
+      handicap,
+      lap_number: lapNumber,
+      elapsed_time: elapsed,
+      corrected_time: correctedTime || undefined,
+      dnf: false,
     });
 
-    ["manualSailor", "manualBoat", "manualSailNumber", "manualHandicap", "manualElapsed", "manualCorrected", "manualPosition"].forEach((id) => {
-      document.getElementById(id).value = "";
-    });
-    document.getElementById("manualDnf").checked = false;
+    if (boatSelect) boatSelect.value = "";
+    const sailInput = document.getElementById("manualSailNumber");
+    const lapsInput = document.getElementById("manualLaps");
+    const elapsedInput = document.getElementById("manualElapsed");
+    if (sailInput) sailInput.value = "";
+    if (lapsInput) lapsInput.value = "1";
+    if (elapsedInput) elapsedInput.value = "";
     status.textContent = `${manualEntries.length} manual row(s) ready.`;
     renderManualEntries();
   }
@@ -718,33 +475,13 @@
       return;
     }
 
-    const existingRaceId = (document.getElementById("manualRaceId").value || "").trim();
-    let raceId = existingRaceId;
+    const raceId = (document.getElementById("manualRaceId")?.value || "").trim();
+    if (!raceId) {
+      status.textContent = "Open a pending race with Edit first.";
+      return;
+    }
 
     try {
-      if (!raceId) {
-        const seriesId = (document.getElementById("manualSeriesId").value || "").trim();
-        const raceNo = (document.getElementById("manualRaceNo").value || "").trim();
-        const startedAt = (document.getElementById("manualStartedAt").value || "").trim();
-        const endedAt = (document.getElementById("manualEndedAt").value || "").trim();
-
-        if (!seriesId || !startedAt) {
-          status.textContent = "Select a series and start time, or provide an existing race ID.";
-          return;
-        }
-
-        const createPayload = {
-          series_id: Number(seriesId),
-          race_no: raceNo ? Number(raceNo) : undefined,
-          started_at: startedAt,
-          ended_at: endedAt || startedAt,
-          reason: "Manual hand-captured race entry",
-        };
-
-        const created = await postJson("/api/races/retrospective", createPayload);
-        raceId = created.race_id;
-      }
-
       await postJson(`/api/races/${encodeURIComponent(raceId)}/retrospective/draft`, {
         entries: manualEntries,
         replace_existing: true,
@@ -753,7 +490,7 @@
 
       status.textContent = `Saved ${manualEntries.length} row(s) to race ${raceId}.`;
       setWorkflowRaceId(raceId);
-      await loadRetrospectiveRaces();
+      await loadRaceQueue(showingApprovedQueue);
     } catch (e) {
       status.textContent = e.message || "Failed to save manual race.";
     }
@@ -827,43 +564,43 @@
     }
 
     status.textContent = `Applied import to race ${raceId}. Entries: ${data.saved_entries || data.count || 0}.`;
+    await loadRaceQueue(showingApprovedQueue);
   }
 
+
+  // --- Navigation and event wiring ---
   document.querySelectorAll(".dash-nav-btn[data-view]").forEach((btn) => {
     btn.addEventListener("click", () => setActiveView(btn.getAttribute("data-view")));
   });
 
-  document.getElementById("reloadCalendar").addEventListener("click", loadCalendar);
-  document.getElementById("exportResultsBtn").addEventListener("click", exportResults);
-  document.getElementById("previewImportBtn").addEventListener("click", previewImport);
-  document.getElementById("applyImportBtn").addEventListener("click", applyImport);
+  // Race Queue controls
+  document.getElementById("manualSailor")?.addEventListener("change", () => {
+    populateManualBoatOptions();
+  });
+  document.getElementById("manualBoat")?.addEventListener("change", (e) => {
+    const sailNumber = e.target?.options?.[e.target.selectedIndex]?.dataset?.sailNumber || "";
+    const sailInput = document.getElementById("manualSailNumber");
+    if (sailInput && sailNumber) sailInput.value = sailNumber;
+  });
+
+  document.getElementById("showUnapprovedRacesBtn")?.addEventListener("click", () => {
+    closeRaceEditWorkflow();
+    loadRaceQueue(false);
+  });
+  document.getElementById("showApprovedRacesBtn")?.addEventListener("click", () => {
+    closeRaceEditWorkflow();
+    loadRaceQueue(true);
+  });
+  document.getElementById("closeRaceEditBtn")?.addEventListener("click", closeRaceEditWorkflow);
+  document.getElementById("raceApprovalForm")?.addEventListener("submit", approveSelectedRaces);
+
+  // ...existing event wiring...
+  document.getElementById("reloadCalendar")?.addEventListener("click", loadCalendar);
+  document.getElementById("exportResultsBtn")?.addEventListener("click", exportResults);
+  document.getElementById("previewImportBtn")?.addEventListener("click", previewImport);
+  document.getElementById("applyImportBtn")?.addEventListener("click", applyImport);
   document.getElementById("addManualEntryBtn")?.addEventListener("click", addManualEntry);
   document.getElementById("saveManualRaceBtn")?.addEventListener("click", saveManualRace);
-  document.getElementById("reloadRetrospectiveBtn")?.addEventListener("click", loadRetrospectiveRaces);
-  document.getElementById("previewRetrospectiveBtn")?.addEventListener("click", previewRetrospective);
-  document.getElementById("publishRetrospectiveBtn")?.addEventListener("click", publishRetrospective);
-  document.getElementById("assignDutyBtn")?.addEventListener("click", assignDuty);
-  document.getElementById("dutyRoleCode")?.addEventListener("change", updateDutyEligibilityHint);
-  document.getElementById("dutyStatus")?.addEventListener("change", updateDutyEligibilityHint);
-  document.getElementById("dutyMobileFirst")?.addEventListener("change", () => {
-    applyMobileModeForSelects("dutyRoleCode", "dutyStatus", "dutyMobileFirst", "dutyEligibilityHint");
-    updateDutyEligibilityHint();
-  });
-  document.getElementById("dutyConflictCloseBtn")?.addEventListener("click", closeDutyConflictModal);
-  document.getElementById("dutyConflictCancelBtn")?.addEventListener("click", closeDutyConflictModal);
-  document.getElementById("dutyConflictConfirmBtn")?.addEventListener("click", async () => {
-    if (!pendingDutyAssignment) return;
-    try {
-      await submitDutyAssignment(pendingDutyAssignment);
-      closeDutyConflictModal();
-    } catch (e) {
-      setDutyStatus(e.message || "Failed to assign duty.", "error");
-    }
-  });
-  document.getElementById("dutyFilterStatus")?.addEventListener("change", renderDutyRows);
-  document.getElementById("dutyFilterRole")?.addEventListener("change", renderDutyRows);
-  document.getElementById("dutyFilterCoverage")?.addEventListener("change", renderDutyRows);
-  document.getElementById("dutyFilterSearch")?.addEventListener("input", renderDutyRows);
   document.getElementById("clearManualEntriesBtn")?.addEventListener("click", () => {
     manualEntries.length = 0;
     document.getElementById("manualImportStatus").textContent = "Manual rows cleared.";
@@ -880,12 +617,9 @@
         }
       },
       { run: loadCalendar, fallback: () => setTableFallback("calendarRows", 5, "Unable to load race calendar right now.") },
-      { run: loadDuties, fallback: () => setTableFallback("dutyRows", 8, "Unable to load duty roster right now.") },
-      { run: loadDutyControls },
-      { run: loadReviewQueue, fallback: () => setTableFallback("reviewRows", 7, "Unable to load review queue right now.") },
+      { run: loadRaceQueue, fallback: () => setTableFallback("raceQueueRows", 8, "Unable to load race queue right now.") },
       { run: loadHandicapRecommendations, fallback: () => setTableFallback("handicapRows", 6, "Unable to load handicap recommendations right now.") },
       { run: loadSeriesOptions },
-      { run: loadRetrospectiveRaces, fallback: () => setTableFallback("retrospectiveRows", 8, "Unable to load retrospective races right now.") },
     ];
 
     for (const task of tasks) {
@@ -904,7 +638,11 @@
     }
 
     renderManualEntries();
-    applyMobileModeForSelects("dutyRoleCode", "dutyStatus", "dutyMobileFirst", "dutyEligibilityHint");
-    updateDutyEligibilityHint();
+    if (typeof applyMobileModeForSelects === "function") {
+      applyMobileModeForSelects("dutyRoleCode", "dutyStatus", "dutyMobileFirst", "dutyEligibilityHint");
+    }
+    if (typeof updateDutyEligibilityHint === "function") {
+      updateDutyEligibilityHint();
+    }
   })();
 })();

@@ -42,6 +42,25 @@ def ensure_results_editable(race_row, race_is_locked):
     return True, None
 
 
+def _normalize_rows_to_max_laps(rows, lap_key, elapsed_key, corrected_key, normalize_elapsed=True):
+    lap_values = [int(row.get(lap_key) or 0) for row in rows if int(row.get(lap_key) or 0) > 0]
+    max_laps = max(lap_values, default=0)
+    target_laps = max_laps
+    if target_laps <= 1:
+        return [dict(row) for row in rows]
+
+    normalized = []
+    for row in rows:
+        item = dict(row)
+        laps = max(int(item.get(lap_key) or 0), 1)
+        if normalize_elapsed and item.get(elapsed_key) is not None:
+            item[elapsed_key] = round(float(item[elapsed_key]) * target_laps / laps)
+        if item.get(corrected_key) is not None:
+            item[corrected_key] = round(float(item[corrected_key]) * target_laps / laps)
+        normalized.append(item)
+    return normalized
+
+
 def web_start_race(
     db,
     payload,
@@ -235,7 +254,13 @@ def web_race_summary(db, race_id, club_id):
             race_row = get_race_summary_header(conn, race_id, club_id)
             if not race_row:
                 return {"ok": False, "error": "Race not found"}, 404
-            results_rows = get_race_summary_results(conn, race_id)
+            results_rows = _normalize_rows_to_max_laps(
+                get_race_summary_results(conn, race_id),
+                "lap_count",
+                "final_elapsed_sec",
+                "final_corrected_sec",
+                normalize_elapsed=False,
+            )
 
         def secs_to_hms(s):
             if s is None:
@@ -245,7 +270,10 @@ def web_race_summary(db, race_id, club_id):
 
         started_at = race_row["started_at"]
         ended_at = race_row["ended_at"]
-        duration_sec = int((ended_at - started_at).total_seconds()) if started_at and ended_at else None
+        duration_candidates = [int(row["final_elapsed_sec"]) for row in results_rows if row.get("final_elapsed_sec") is not None]
+        duration_sec = max(duration_candidates) if duration_candidates else (
+            int((ended_at - started_at).total_seconds()) if started_at and ended_at else None
+        )
 
         race_info = {
             "race_no": race_row["race_no"],
@@ -256,21 +284,28 @@ def web_race_summary(db, race_id, club_id):
             "duration": secs_to_hms(duration_sec),
         }
 
-        results = [
-            {
-                "entry_id": row["entry_id"],
-                "sailor": row["sailor"],
-                "boat": row["boat"],
-                "sail_number": row["sail_number"],
-                "handicap": row["handicap"],
-                "lap_count": int(row["lap_count"]) if row["lap_count"] else 0,
-                "elapsed_time": secs_to_hms(row["final_elapsed_sec"]),
-                "corrected_time": secs_to_hms(row["final_corrected_sec"]),
-                "position": row["final_position"],
-                "dnf": row["final_position"] is None,
-            }
-            for row in results_rows
-        ]
+        results = []
+        next_position = 1
+        for row in results_rows:
+            is_finished = row["final_elapsed_sec"] is not None or row["final_corrected_sec"] is not None
+            position = next_position if is_finished else None
+            if is_finished:
+                next_position += 1
+
+            results.append(
+                {
+                    "entry_id": row["entry_id"],
+                    "sailor": row["sailor"],
+                    "boat": row["boat"],
+                    "sail_number": row["sail_number"],
+                    "handicap": row["handicap"],
+                    "lap_count": int(row["lap_count"]) if row["lap_count"] else 0,
+                    "elapsed_time": secs_to_hms(row["final_elapsed_sec"]),
+                    "corrected_time": secs_to_hms(row["final_corrected_sec"]),
+                    "position": position,
+                    "dnf": not is_finished,
+                }
+            )
 
         return {"ok": True, "race": race_info, "results": results}, 200
     except Exception as exc:

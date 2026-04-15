@@ -112,6 +112,7 @@ def get_preview_entries(conn, race_id):
                    re.boat,
                    re.sail_number,
                    re.handicap,
+                   COALESCE(MAX(l.lap_number), COUNT(l.key), 0)        AS lap_count,
                    MAX(CASE WHEN l.is_finish THEN l.elapsed_sec END)   AS elapsed_sec,
                    MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS corrected_sec,
                    MAX(CASE WHEN l.is_finish THEN l.position END)      AS position

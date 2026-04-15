@@ -35,6 +35,36 @@ def _to_bool(value):
     return str(value or "").strip().lower() in ("1", "true", "yes", "y", "dnf")
 
 
+def _normalize_rows_to_max_laps(rows, lap_key="lap_count", elapsed_key="elapsed_sec", corrected_key="corrected_sec"):
+    lap_values = [int(row.get(lap_key) or 0) for row in rows if int(row.get(lap_key) or 0) > 0]
+    max_laps = max(lap_values, default=0)
+    target_laps = max_laps
+    if target_laps <= 1:
+        return [dict(row) for row in rows]
+
+    normalized = []
+    for row in rows:
+        item = dict(row)
+        laps = max(int(item.get(lap_key) or 0), 1)
+        if elapsed_key and item.get(elapsed_key) is not None:
+            item[elapsed_key] = round(float(item[elapsed_key]) * target_laps / laps)
+        if corrected_key and item.get(corrected_key) is not None:
+            item[corrected_key] = round(float(item[corrected_key]) * target_laps / laps)
+        normalized.append(item)
+    return normalized
+
+
+def _normalize_rows_by_race(rows, race_key="race_id", lap_key="lap_count", elapsed_key="elapsed_sec", corrected_key="corrected_sec"):
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(row.get(race_key), []).append(row)
+
+    normalized = []
+    for race_rows in grouped.values():
+        normalized.extend(_normalize_rows_to_max_laps(race_rows, lap_key, elapsed_key, corrected_key))
+    return normalized
+
+
 def dashboard_sailors_boats(db, club_id):
     try:
         with db.engine.connect() as conn:
@@ -76,7 +106,7 @@ def dashboard_sailors_boats(db, club_id):
 def dashboard_landing_overview(db, club_id):
     try:
         with db.engine.connect() as conn:
-            latest_rows = get_latest_race_results_rows(conn, club_id)
+            latest_rows = _normalize_rows_by_race(get_latest_race_results_rows(conn, club_id))
             stats = get_club_summary_stats(conn, club_id)
 
         latest_results = []
@@ -192,7 +222,7 @@ def dashboard_export_results_csv(db, club_id, race_id):
         with db.engine.connect() as conn:
             if not race_belongs_to_club(conn, race_id, club_id):
                 return {"ok": False, "error": "Race not found"}, 404
-            rows = get_export_results_rows(conn, race_id)
+            rows = _normalize_rows_to_max_laps(get_export_results_rows(conn, race_id))
 
         buffer = io.StringIO()
         writer = csv.writer(buffer)

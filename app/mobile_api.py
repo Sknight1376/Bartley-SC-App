@@ -51,6 +51,37 @@ def _secs_to_hms(s):
     return f"{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}"
 
 
+def _rank_finished_rows(rows, position_key, elapsed_key, corrected_key):
+    ranked = []
+    next_position = 1
+    for row in rows:
+        is_finished = row.get(elapsed_key) is not None or row.get(corrected_key) is not None
+        position = next_position if is_finished else None
+        if is_finished:
+            next_position += 1
+        ranked.append((row, position, not is_finished))
+    return ranked
+
+
+def _normalize_rows_to_max_laps(rows, lap_key, elapsed_key, corrected_key, normalize_elapsed=True):
+    lap_values = [int(row.get(lap_key) or 0) for row in rows if int(row.get(lap_key) or 0) > 0]
+    max_laps = max(lap_values, default=0)
+    target_laps = max_laps
+    if target_laps <= 1:
+        return [dict(row) for row in rows]
+
+    normalized = []
+    for row in rows:
+        item = dict(row)
+        laps = max(int(item.get(lap_key) or 0), 1)
+        if normalize_elapsed and item.get(elapsed_key) is not None:
+            item[elapsed_key] = round(float(item[elapsed_key]) * target_laps / laps)
+        if item.get(corrected_key) is not None:
+            item[corrected_key] = round(float(item[corrected_key]) * target_laps / laps)
+        normalized.append(item)
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # Control access (pre-existing)
 # ---------------------------------------------------------------------------
@@ -462,8 +493,18 @@ def mobile_race_results(db, race_id, club_id, sailor_id):
         with db.engine.connect() as conn:
             if not get_race_exists_for_club(conn, race_id, club_id):
                 return {"ok": False, "error": "Race not found"}, 404
-            my_results = get_my_race_results(conn, race_id, sailor_id)
-            leaderboard = get_race_leaderboard(conn, race_id)
+            my_results = _normalize_rows_to_max_laps(
+                get_my_race_results(conn, race_id, sailor_id),
+                "lap_count",
+                "elapsed_sec",
+                "corrected_sec",
+            )
+            leaderboard = _normalize_rows_to_max_laps(
+                get_race_leaderboard(conn, race_id),
+                "lap_count",
+                "elapsed_sec",
+                "corrected_sec",
+            )
 
         return {
             "ok": True,
@@ -473,21 +514,26 @@ def mobile_race_results(db, race_id, club_id, sailor_id):
                     "sailor": r["sailor"],
                     "boat": r["boat"],
                     "sail_number": r["sail_number"],
-                    "position": r["position"],
+                    "lap_count": int(r["lap_count"]) if r.get("lap_count") else 0,
+                    "position": position,
                     "elapsed_time": _secs_to_hms(r["elapsed_sec"]),
                     "corrected_time": _secs_to_hms(r["corrected_sec"]),
+                    "dnf": dnf,
                 }
-                for r in my_results
+                for r, position, dnf in _rank_finished_rows(my_results, "position", "elapsed_sec", "corrected_sec")
             ],
             "leaderboard": [
                 {
                     "sailor": r["sailor"],
                     "boat": r["boat"],
                     "sail_number": r["sail_number"],
-                    "position": r["position"],
+                    "lap_count": int(r["lap_count"]) if r.get("lap_count") else 0,
+                    "position": position,
+                    "elapsed_time": _secs_to_hms(r["elapsed_sec"]),
                     "corrected_time": _secs_to_hms(r["corrected_sec"]),
+                    "dnf": dnf,
                 }
-                for r in leaderboard
+                for r, position, dnf in _rank_finished_rows(leaderboard, "position", "elapsed_sec", "corrected_sec")
             ],
         }, 200
     except Exception as e:
@@ -562,12 +608,22 @@ def mobile_control_summary(db, race_id, club_id):
     try:
         with db.engine.connect() as conn:
             race_row, results_rows = get_control_summary(conn, race_id, club_id)
+            results_rows = _normalize_rows_to_max_laps(
+                results_rows,
+                "lap_count",
+                "final_elapsed_sec",
+                "final_corrected_sec",
+                normalize_elapsed=False,
+            )
         if race_row is None:
             return {"ok": False, "error": "Race not found"}, 404
 
         started_at = race_row["started_at"]
         ended_at = race_row["ended_at"]
-        duration_sec = int((ended_at - started_at).total_seconds()) if started_at and ended_at else None
+        duration_candidates = [int(row["final_elapsed_sec"]) for row in results_rows if row.get("final_elapsed_sec") is not None]
+        duration_sec = max(duration_candidates) if duration_candidates else (
+            int((ended_at - started_at).total_seconds()) if started_at and ended_at else None
+        )
 
         race_info = {
             "race_no": race_row["race_no"],
@@ -588,10 +644,10 @@ def mobile_control_summary(db, race_id, club_id):
                 "lap_count": int(row["lap_count"]) if row["lap_count"] else 0,
                 "elapsed_time": _secs_to_hms(row["final_elapsed_sec"]),
                 "corrected_time": _secs_to_hms(row["final_corrected_sec"]),
-                "position": row["final_position"],
-                "dnf": row["final_position"] is None,
+                "position": position,
+                "dnf": dnf,
             }
-            for row in results_rows
+            for row, position, dnf in _rank_finished_rows(results_rows, "final_position", "final_elapsed_sec", "final_corrected_sec")
         ]
 
         return {"ok": True, "race": race_info, "results": results}, 200

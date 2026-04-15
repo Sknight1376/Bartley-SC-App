@@ -337,16 +337,25 @@ def get_race_summary_results(conn, race_id):
         text('''
             SELECT re.key AS entry_id,
                    re.sailor, re.boat, re.sail_number, re.handicap,
-                   COUNT(l.key) AS lap_count,
-                   MAX(CASE WHEN l.is_finish THEN l.elapsed_sec   END) AS final_elapsed_sec,
+                   COALESCE(MAX(l.lap_number), COUNT(l.key), 0) AS lap_count,
+                   MAX(CASE WHEN l.is_finish THEN l.elapsed_sec END) AS final_elapsed_sec,
                    MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS final_corrected_sec,
-                   MAX(CASE WHEN l.is_finish THEN l.position      END) AS final_position
+                   MAX(CASE WHEN l.is_finish THEN l.position END) AS final_position
             FROM "RACINGAPP"."RACE_ENTRY" re
             LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
             WHERE re.race_id = :race_id
             GROUP BY re.key, re.sailor, re.boat, re.sail_number, re.handicap
-            ORDER BY MAX(CASE WHEN l.is_finish THEN l.position      END) ASC NULLS LAST,
-                     MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) ASC NULLS LAST
+            ORDER BY CASE
+                       WHEN COALESCE(MAX(l.lap_number), COUNT(l.key), 0) > 0
+                       THEN ROUND(MAX(CASE WHEN l.is_finish THEN l.corrected_sec END)::numeric / COALESCE(MAX(l.lap_number), COUNT(l.key), 0), 0)
+                       ELSE MAX(CASE WHEN l.is_finish THEN l.corrected_sec END)
+                     END ASC NULLS LAST,
+                     CASE
+                       WHEN COALESCE(MAX(l.lap_number), COUNT(l.key), 0) > 0
+                       THEN ROUND(MAX(CASE WHEN l.is_finish THEN l.elapsed_sec END)::numeric / COALESCE(MAX(l.lap_number), COUNT(l.key), 0), 0)
+                       ELSE MAX(CASE WHEN l.is_finish THEN l.elapsed_sec END)
+                     END ASC NULLS LAST,
+                     re.key ASC
         '''),
         {"race_id": race_id}
     ).mappings().all()

@@ -978,15 +978,6 @@ def api_dashboard_race_calendar():
     return jsonify(payload), status
 
 
-@app.get("/api/dashboard/duty-roster")
-def api_dashboard_duty_roster():
-    guard = require_club_admin()
-    if guard is not None:
-        return guard
-    payload, status = dashboard_duty_roster(db, session.get("club_id"), request.args)
-    return jsonify(payload), status
-
-
 @app.get("/api/dashboard/results-review-queue")
 def api_dashboard_results_review_queue():
     guard = require_club_admin()
@@ -2097,73 +2088,6 @@ def api_decide_handicap_recommendation(race_id, recommendation_id):
         request.get_json(silent=True) or {},
         get_actor_context(mobile=False),
         create_race_revision,
-        write_race_audit,
-    )
-    return jsonify(payload), status
-
-
-@app.get("/api/races/<int:race_id>/duties")
-def api_list_race_duties(race_id):
-    guard = require_club_admin()
-    if guard is not None:
-        return guard
-
-    payload, status = list_race_duties(db, race_id, session.get("club_id"))
-    return jsonify(payload), status
-
-
-@app.post("/api/races/<int:race_id>/duties")
-def api_assign_race_duty(race_id):
-    guard = require_club_admin()
-    if guard is not None:
-        return guard
-
-    payload, status = assign_race_duty(
-        db,
-        race_id,
-        request.get_json(silent=True) or {},
-        session.get("club_id"),
-        get_actor_context(mobile=False),
-        parse_iso_datetime,
-        resolve_role_id,
-        upsert_race_duty_assignment,
-        write_race_audit,
-    )
-    return jsonify(payload), status
-
-
-@app.post("/api/races/duties/by-date")
-def api_assign_race_duty_by_date():
-    guard = require_club_admin()
-    if guard is not None:
-        return guard
-
-    payload, status = assign_race_duty_by_date(
-        db,
-        request.get_json(silent=True) or {},
-        session.get("club_id"),
-        get_actor_context(mobile=False),
-        parse_iso_datetime,
-        parse_date_yyyy_mm_dd,
-        resolve_role_id,
-        upsert_race_duty_assignment,
-        write_race_audit,
-    )
-    return jsonify(payload), status
-
-
-@app.delete("/api/races/<int:race_id>/duties/<int:duty_id>")
-def api_delete_race_duty(race_id, duty_id):
-    guard = require_club_admin()
-    if guard is not None:
-        return guard
-
-    payload, status = delete_race_duty(
-        db,
-        race_id,
-        duty_id,
-        session.get("club_id"),
-        get_actor_context(mobile=False),
         write_race_audit,
     )
     return jsonify(payload), status

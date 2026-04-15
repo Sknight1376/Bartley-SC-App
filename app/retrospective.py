@@ -23,6 +23,38 @@ def _secs_to_hms(s):
     return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
 
 
+def _corrected_seconds(elapsed_sec, handicap):
+    if elapsed_sec in (None, "") or handicap in (None, "", 0):
+        return None
+    try:
+        elapsed_sec = int(elapsed_sec)
+        handicap = int(float(handicap))
+    except (TypeError, ValueError):
+        return None
+    if handicap <= 0:
+        return None
+    return round((elapsed_sec * 1000) / handicap)
+
+
+def _normalize_rows_to_max_laps(rows, lap_key="lap_count", elapsed_key="elapsed_sec", corrected_key="corrected_sec"):
+    lap_values = [int(row.get(lap_key) or 0) for row in rows if int(row.get(lap_key) or 0) > 0]
+    max_laps = max(lap_values, default=0)
+    target_laps = max_laps
+    if target_laps <= 1:
+        return [dict(row) for row in rows]
+
+    normalized = []
+    for row in rows:
+        item = dict(row)
+        laps = max(int(item.get(lap_key) or 0), 1)
+        if item.get(elapsed_key) is not None:
+            item[elapsed_key] = round(float(item[elapsed_key]) * target_laps / laps)
+        if item.get(corrected_key) is not None:
+            item[corrected_key] = round(float(item[corrected_key]) * target_laps / laps)
+        normalized.append(item)
+    return normalized
+
+
 def list_retrospective_races(
     db,
     club_id,
@@ -168,6 +200,7 @@ def save_retrospective_draft(
 
             saved_entries = 0
             saved_finishes = 0
+            pending_finish_rows = []
 
             for idx, row in enumerate(entries):
                 sailor = (row.get("sailor") or "").strip()
@@ -233,6 +266,8 @@ def save_retrospective_draft(
                             corrected_sec = parse_hms_to_seconds(corrected_time)
                         except Exception:
                             return {"ok": False, "error": f"entries[{idx}] invalid corrected_time"}, 400
+                    elif handicap not in (None, "", "N/A"):
+                        corrected_sec = _corrected_seconds(elapsed_sec, handicap)
 
                     position = None
                     if position_raw not in (None, "", "N/A"):
@@ -247,8 +282,7 @@ def save_retrospective_draft(
                     except (TypeError, ValueError):
                         return {"ok": False, "error": f"entries[{idx}] invalid lap_number"}, 400
 
-                    insert_retrospective_lap(
-                        conn,
+                    pending_finish_rows.append(
                         {
                             "race_entry_id": entry_id,
                             "lap_number": lap_number,
@@ -258,9 +292,25 @@ def save_retrospective_draft(
                             "created_by_user": actor.get("created_by_user"),
                             "created_by_type": actor.get("created_by_type"),
                             "revision_id": revision_id,
-                        },
+                        }
                     )
                     saved_finishes += 1
+
+            if any(item.get("position") is None for item in pending_finish_rows):
+                ordered_rows = sorted(
+                    pending_finish_rows,
+                    key=lambda item: (
+                        item.get("corrected_sec") is None,
+                        (item.get("corrected_sec") / max(int(item.get("lap_number") or 1), 1)) if item.get("corrected_sec") is not None else 10**12,
+                        (item.get("elapsed_sec") / max(int(item.get("lap_number") or 1), 1)) if item.get("elapsed_sec") is not None else 10**12,
+                        item.get("race_entry_id"),
+                    ),
+                )
+                for index, item in enumerate(ordered_rows, start=1):
+                    item["position"] = index
+
+            for item in pending_finish_rows:
+                insert_retrospective_lap(conn, item)
 
             write_race_audit(
                 conn, race_id, actor,
@@ -292,7 +342,7 @@ def preview_retrospective_results(db, race_id, club_id, race_is_locked):
             if not race_row:
                 return {"ok": False, "error": "Race not found"}, 404
 
-            rows = get_preview_entries(conn, race_id)
+            rows = _normalize_rows_to_max_laps(get_preview_entries(conn, race_id))
 
         results = [
             {
