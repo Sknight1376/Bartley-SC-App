@@ -1,6 +1,24 @@
 from sqlalchemy import text
 
 
+def get_sailor_user_context(conn, sailor_user_id):
+    if sailor_user_id in (None, "", "null"):
+        return None
+    return conn.execute(
+        text('''
+            SELECT su.key AS sailor_user_id,
+                   su.username,
+                   su.sailor AS sailor_id,
+                   sc.club AS club_id
+            FROM "RACINGAPP"."SAILORUSER" su
+            JOIN "RACINGAPP"."SAILORCONTROL" sc ON sc.key = su.sailor
+            WHERE su.key = :sailor_user_id
+            LIMIT 1
+        '''),
+        {"sailor_user_id": sailor_user_id}
+    ).mappings().first()
+
+
 def resolve_sailor_club_id(conn, sailor_id):
     return conn.execute(
         text('''
@@ -195,6 +213,7 @@ def get_series_for_club(conn, club_id):
             SELECT key AS id, year, name
             FROM "RACINGAPP"."SERIESCONTROL"
             WHERE club = :club_id
+              AND COALESCE(name, '') NOT ILIKE '%pursuit%'
             ORDER BY year DESC NULLS LAST, name ASC
         '''),
         {"club_id": club_id}
@@ -274,6 +293,7 @@ def get_upcoming_races(conn, club_id, sailor_id):
             FROM "RACINGAPP"."RACE" r
             JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
             WHERE r.club = :club_id
+              AND COALESCE(sc.name, '') NOT ILIKE '%pursuit%'
               AND r.status IN ('not_started', 'active')
               AND r.started_at IS NOT NULL
               AND r.started_at < (NOW() + INTERVAL '5 day')
@@ -304,6 +324,7 @@ def get_dashboard_data(conn, club_id, sailor_id):
             FROM "RACINGAPP"."RACE" r
             JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
             WHERE r.club = :club_id
+              AND COALESCE(sc.name, '') NOT ILIKE '%pursuit%'
               AND r.status IN ('not_started', 'active')
               AND r.started_at IS NOT NULL
               AND r.started_at < (NOW() + INTERVAL '5 day')
@@ -316,17 +337,31 @@ def get_dashboard_data(conn, club_id, sailor_id):
 
     completed = conn.execute(
         text('''
+            WITH latest_club_day AS (
+                SELECT DATE(MAX(COALESCE(r.ended_at, r.started_at))) AS latest_day
+                FROM "RACINGAPP"."RACE" r
+                JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+                WHERE r.club = :club_id
+                  AND r.status = 'finished'
+                  AND COALESCE(sc.name, '') NOT ILIKE '%pursuit%'
+            )
             SELECT r.key AS race_id, r.race_no, r.status, r.started_at,
                    sc.name AS series_name,
-                   TRUE AS joined, TRUE AS results_available
+                   CASE WHEN EXISTS (
+                       SELECT 1 FROM "RACINGAPP"."RACE_ENTRY" re
+                       JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
+                       WHERE re.race_id = r.key AND bc.sailor = :sailor_id
+                   ) THEN TRUE ELSE FALSE END AS joined,
+                   TRUE AS results_available
             FROM "RACINGAPP"."RACE" r
             JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
-            JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
-            JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
-            WHERE r.club = :club_id AND bc.sailor = :sailor_id AND r.status = 'finished'
-            GROUP BY r.key, r.race_no, r.status, r.started_at, sc.name
+            CROSS JOIN latest_club_day lcd
+            WHERE r.club = :club_id
+              AND r.status = 'finished'
+              AND COALESCE(sc.name, '') NOT ILIKE '%pursuit%'
+              AND lcd.latest_day IS NOT NULL
+              AND DATE(COALESCE(r.ended_at, r.started_at)) = lcd.latest_day
             ORDER BY COALESCE(r.ended_at, r.started_at) DESC NULLS LAST, r.key DESC
-            LIMIT 10
         '''),
         {"club_id": club_id, "sailor_id": sailor_id}
     ).mappings().all()
@@ -335,9 +370,11 @@ def get_dashboard_data(conn, club_id, sailor_id):
         text('''
             SELECT DATE(MAX(COALESCE(r.ended_at, r.started_at))) AS latest_day
             FROM "RACINGAPP"."RACE" r
+            JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
             JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
             JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
             WHERE r.club = :club_id AND bc.sailor = :sailor_id
+              AND COALESCE(sc.name, '') NOT ILIKE '%pursuit%'
               AND EXISTS (
                   SELECT 1 FROM "RACINGAPP"."LAP" l
                   WHERE l.race_entry_id = re.key AND l.is_finish = TRUE
@@ -361,6 +398,7 @@ def get_dashboard_data(conn, club_id, sailor_id):
                 JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
                 LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
                 WHERE r.club = :club_id AND bc.sailor = :sailor_id
+                  AND COALESCE(sc.name, '') NOT ILIKE '%pursuit%'
                   AND DATE(COALESCE(r.ended_at, r.started_at)) = :latest_day
                   AND EXISTS (
                       SELECT 1 FROM "RACINGAPP"."LAP" l2
@@ -384,6 +422,7 @@ def get_dashboard_data(conn, club_id, sailor_id):
                 JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
                 LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
                 WHERE r.club = :club_id
+                  AND COALESCE(sc.name, '') NOT ILIKE '%pursuit%'
                 GROUP BY r.series, sc.name, bc.sailor, re.sailor, re.key
             ),
             points AS (
@@ -425,6 +464,7 @@ def get_series_standings(conn, club_id):
                 JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
                 LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
                 WHERE r.club = :club_id
+                  AND COALESCE(sc.name, '') NOT ILIKE '%pursuit%'
                 GROUP BY r.series, sc.name, bc.sailor, re.sailor, re.key
             ),
             points AS (

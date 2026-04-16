@@ -3,6 +3,10 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val releaseApiBaseUrl = (findProperty("LAYLINE_RELEASE_API_BASE_URL") as String?)
+    ?: System.getenv("LAYLINE_RELEASE_API_BASE_URL")
+    ?: "https://api.quicksail.example/"
+
 android {
     namespace = "com.quicksail.sailor"
     compileSdk = 34
@@ -24,8 +28,9 @@ android {
             buildConfigField("boolean", "FEATURE_HTTP_BODY_LOGGING", "true")
         }
         release {
-            isMinifyEnabled = false
-            buildConfigField("String", "API_BASE_URL", "\"https://api.quicksail.example/\"")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            buildConfigField("String", "API_BASE_URL", "\"${releaseApiBaseUrl}\"")
             buildConfigField("boolean", "FEATURE_HTTP_BODY_LOGGING", "false")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

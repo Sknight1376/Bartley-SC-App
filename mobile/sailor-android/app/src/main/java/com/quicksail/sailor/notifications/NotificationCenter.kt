@@ -31,12 +31,13 @@ import java.util.Locale
 object NotificationCenter {
 	private const val CHANNEL_ID = "race_updates"
 	private const val CHANNEL_NAME = "Race updates"
-	private const val CHANNEL_DESC = "Notifications for races, results, and series completion"
+	private const val CHANNEL_DESC = "Notifications for race reminders, results, duties, and series updates"
 
 	private const val PREFS_NAME = "quicksail_notifications"
 	private const val KEY_SEEN_UPCOMING = "seen_upcoming_ids"
 	private const val KEY_SEEN_RESULTS = "seen_result_ids"
 	private const val KEY_SEEN_SERIES_END = "seen_series_end"
+	private const val KEY_UPCOMING_JSON = "upcoming_races_json"
 	private const val KEY_BASELINE_UPCOMING_SET = "baseline_upcoming_set"
 	private const val KEY_BASELINE_RESULTS_SET = "baseline_results_set"
 	private const val KEY_BASELINE_SERIES_SET = "baseline_series_set"
@@ -73,6 +74,7 @@ object NotificationCenter {
 	) {
 		if (!initialized) return
 
+		scheduleUpcomingRaceReminders(appContext, upcomingRaces)
 		maybeNotifyUpcomingRaces(upcomingRaces)
 		maybeNotifyResults(latestDayResults, latestResult)
 	}
@@ -86,6 +88,11 @@ object NotificationCenter {
 	fun setUpcomingEnabled(enabled: Boolean) {
 		if (!initialized) return
 		prefs.edit().putBoolean(KEY_NOTIFY_UPCOMING_ENABLED, enabled).apply()
+		if (enabled) {
+			rescheduleUpcomingRaceAlarmsFromStorage(appContext)
+		} else {
+			cancelUpcomingRaceAlarms(appContext, loadStoredUpcomingRaces())
+		}
 	}
 
 	fun setResultsEnabled(enabled: Boolean) {
@@ -131,9 +138,14 @@ object NotificationCenter {
 		scheduleAlarmsForDuties(context, loadStoredDuties())
 	}
 
+	fun rescheduleUpcomingRaceAlarmsFromStorage(context: Context) {
+		if (!initialized) init(context)
+		if (!isUpcomingEnabled()) return
+		scheduleAlarmsForUpcomingRaces(context, loadStoredUpcomingRaces())
+	}
+
 	fun postDutyNotification(context: Context, notifId: Int, title: String, text: String) {
 		if (!initialized) init(context)
-		if (!isDutyEnabled()) return
 		notify(notifId, title, text)
 	}
 
@@ -147,6 +159,23 @@ object NotificationCenter {
 		}
 	}
 
+	private fun loadStoredUpcomingRaces(): List<UpcomingRace> {
+		val json = prefs.getString(KEY_UPCOMING_JSON, null) ?: return emptyList()
+		return try {
+			val type = object : TypeToken<List<UpcomingRace>>() {}.type
+			Gson().fromJson(json, type) ?: emptyList()
+		} catch (e: Exception) {
+			emptyList()
+		}
+	}
+
+	private fun parseAppDateTime(raw: String?): LocalDateTime? {
+		if (raw.isNullOrBlank()) return null
+		val normalized = raw.trim().replace(" ", "T")
+		val candidate = if (normalized.length >= 19) normalized.substring(0, 19) else normalized
+		return runCatching { LocalDateTime.parse(candidate) }.getOrNull()
+	}
+
 	private fun scheduleAlarmsForDuties(context: Context, duties: List<SailorDuty>) {
 		val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 		val now = System.currentTimeMillis()
@@ -154,12 +183,7 @@ object NotificationCenter {
 		val timeFmt = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
 
 		for (duty in duties) {
-			val raceDateStr = duty.race_date ?: continue
-			val raceDateTime = try {
-				LocalDateTime.parse(raceDateStr.take(19))
-			} catch (e: Exception) {
-				continue
-			}
+			val raceDateTime = parseAppDateTime(duty.race_date) ?: continue
 			val raceEpoch = raceDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 			val raceLabel = "Race #${duty.race_no ?: "?"}"
 			val clubLabel = duty.club_name ?: "Race"
@@ -197,10 +221,11 @@ object NotificationCenter {
 		triggerAtMillis: Long,
 		notifId: Int,
 		title: String,
-		text: String
+		text: String,
+		action: String = DutyAlarmReceiver.ACTION_DUTY_ALARM
 	) {
 		val intent = Intent(context, DutyAlarmReceiver::class.java).apply {
-			action = DutyAlarmReceiver.ACTION_DUTY_ALARM
+			this.action = action
 			putExtra(DutyAlarmReceiver.EXTRA_TITLE, title)
 			putExtra(DutyAlarmReceiver.EXTRA_TEXT, text)
 			putExtra(DutyAlarmReceiver.EXTRA_NOTIF_ID, notifId)
@@ -225,17 +250,81 @@ object NotificationCenter {
 		}
 	}
 
+	private fun scheduleUpcomingRaceReminders(context: Context, upcomingRaces: List<UpcomingRace>) {
+		if (!initialized) init(context)
+		val existing = loadStoredUpcomingRaces()
+		cancelUpcomingRaceAlarms(context, existing)
+		prefs.edit().putString(KEY_UPCOMING_JSON, Gson().toJson(upcomingRaces)).apply()
+		if (!isUpcomingEnabled()) return
+		scheduleAlarmsForUpcomingRaces(context, upcomingRaces)
+	}
+
+	private fun scheduleAlarmsForUpcomingRaces(context: Context, upcomingRaces: List<UpcomingRace>) {
+		val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+		val now = System.currentTimeMillis()
+		val dayFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
+		val timeFmt = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+
+		upcomingRaces
+			.filter { it.joined }
+			.forEach { race ->
+				val raceDateTime = parseAppDateTime(race.started_at) ?: return@forEach
+				val raceEpoch = raceDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+				val tomorrowTrigger = raceEpoch - 24 * 60 * 60 * 1000L
+				val sameDayTrigger = raceEpoch - 2 * 60 * 60 * 1000L
+
+				if (tomorrowTrigger > now) {
+					scheduleAlarm(
+						context, alarmManager, tomorrowTrigger,
+						notifId = upcomingAlarmNotifId(race.race_id, 0),
+						title = "Race tomorrow",
+						text = "${race.series_name} - Race #${race.race_no} starts ${raceDateTime.format(dayFmt)} at ${raceDateTime.format(timeFmt)}",
+						action = DutyAlarmReceiver.ACTION_RACE_REMINDER
+					)
+				}
+
+				if (sameDayTrigger > now) {
+					scheduleAlarm(
+						context, alarmManager, sameDayTrigger,
+						notifId = upcomingAlarmNotifId(race.race_id, 1),
+						title = "Race today",
+						text = "${race.series_name} - Race #${race.race_no} starts today at ${raceDateTime.format(timeFmt)}",
+						action = DutyAlarmReceiver.ACTION_RACE_REMINDER
+					)
+				}
+			}
+	}
+
+	private fun cancelUpcomingRaceAlarms(context: Context, upcomingRaces: List<UpcomingRace>) {
+		val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+		for (race in upcomingRaces) {
+			for (offset in 0..1) {
+				val notifId = upcomingAlarmNotifId(race.race_id, offset)
+				val intent = Intent(context, DutyAlarmReceiver::class.java).apply {
+					action = DutyAlarmReceiver.ACTION_RACE_REMINDER
+				}
+				val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+				val pi = PendingIntent.getBroadcast(context, notifId, intent, flags)
+				alarmManager.cancel(pi)
+			}
+		}
+	}
+
 	private fun alarmNotifId(raceId: Long, offset: Int): Int {
 		// Lower 15 bits of raceId, shifted left 1, OR offset → unique IDs 0..65535
 		return ((raceId and 0x7FFFL).toInt() shl 1) or offset
+	}
+
+	private fun upcomingAlarmNotifId(raceId: Long, offset: Int): Int {
+		return 120000 + (((raceId and 0x7FFFL).toInt() shl 1) or offset)
 	}
 
 	fun sendTestUpcomingNotification() {
 		if (!initialized || !isUpcomingEnabled()) return
 		notify(
 			id = 8101,
-			title = "Test: New upcoming race",
-			text = "Harbour Series - Race #4 is now open for entry"
+			title = "Test: Upcoming race reminder",
+			text = "Harbour Series - Race #4 starts tomorrow at 11:00"
 		)
 	}
 
@@ -243,8 +332,17 @@ object NotificationCenter {
 		if (!initialized || !isResultsEnabled()) return
 		notify(
 			id = 8102,
-			title = "Test: New result available",
-			text = "Harbour Series - Race #3 result is ready"
+			title = "Test: Results published",
+			text = "Harbour Series - Race #3 results are now live"
+		)
+	}
+
+	fun sendTestPersonalSummaryNotification() {
+		if (!initialized || !isResultsEnabled()) return
+		notify(
+			id = 8105,
+			title = "Test: Your result summary",
+			text = "You finished 2nd in Harbour Series - Race #3"
 		)
 	}
 
@@ -269,6 +367,7 @@ object NotificationCenter {
 	fun sendAllTestNotifications() {
 		sendTestUpcomingNotification()
 		sendTestResultNotification()
+		sendTestPersonalSummaryNotification()
 		sendTestSeriesEndNotification()
 		sendTestDutyNotification()
 	}
@@ -370,12 +469,41 @@ object NotificationCenter {
 
 		notify(
 			id = 2000 + (System.currentTimeMillis() % 1000).toInt(),
-			title = "New result available",
-			text = if (sample != null) "${sample.series_name} - Race #${sample.race_no} result is ready" else "Your new race result is ready"
+			title = "Results published",
+			text = if (sample != null) "${sample.series_name} - Race #${sample.race_no} results are now live" else "New race results are now available"
 		)
+
+		latestResult
+			?.takeIf { newResultIds.contains(it.race_id.toString()) }
+			?.let { personal ->
+				notify(
+					id = 2100 + (System.currentTimeMillis() % 1000).toInt(),
+					title = "Your result summary",
+					text = buildPersonalResultSummary(personal)
+				)
+			}
 
 		seen.addAll(newResultIds)
 		prefs.edit().putStringSet(KEY_SEEN_RESULTS, seen).apply()
+	}
+
+	private fun buildPersonalResultSummary(result: DashboardLatestResult): String {
+		val place = result.position?.let { ordinal(it) } ?: "a finishing"
+		return if (result.position != null) {
+			"You finished $place in ${result.series_name} - Race #${result.race_no}"
+		} else {
+			"Your ${result.series_name} - Race #${result.race_no} result is now available"
+		}
+	}
+
+	private fun ordinal(value: Int): String {
+		if (value % 100 in 11..13) return "${value}th"
+		return when (value % 10) {
+			1 -> "${value}st"
+			2 -> "${value}nd"
+			3 -> "${value}rd"
+			else -> "${value}th"
+		}
 	}
 
 	private fun notify(id: Int, title: String, text: String) {

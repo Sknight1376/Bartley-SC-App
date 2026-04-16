@@ -1,54 +1,89 @@
-# Sailor Android Starter
+# Layline Sailor App
 
-Starter Android app for the QuickSail sailor spoke.
+Android companion app for the Layline sailing platform.
 
-## Includes
-- Kotlin + Jetpack Compose
-- Retrofit + OkHttp client
-- Session cookie support (in-memory cookie jar)
-- API models and service methods matching backend mobile endpoints
-- Basic screens/flow for:
-  - Login/logout
-  - View/edit sailor profile
-  - View upcoming races
-  - Join race
-  - View own results
+## Current position
+
+The app now broadly matches the Phase 1 MVP described in the main project roadmap and supports the core sailor journey:
+
+- create and manage a sailor profile
+- assign the sailor to a club
+- add and manage boats
+- view upcoming races
+- enter races
+- view latest results and personal latest races
+- view web-style series standings in a mobile-friendly layout
+- receive race, result, series, and duty notifications
+- continue to work in degraded or offline mode using cached data and queued actions
+
+## Tech stack
+
+- Kotlin and Jetpack Compose
+- Retrofit and OkHttp
+- encrypted local preferences for session and app state
+- persistent cookie-backed session continuity
+- offline caching and queued action sync
+
+## Phase 1 MVP status
+
+### Included in the current app
+- sailor profile and club assignment
+- upcoming race entry flow
+- latest results and personal race history
+- mobile race-control support for eligible users
+- Phase 1 notifications for results published, personal result summary, and upcoming race reminders
+- offline support
+
+### Remaining Phase 1 polish
+- continued UI refinement for smaller screens
+- deployment and build consistency across Windows and Linux mirrors
+- final end-to-end device validation
+
+## Development pathway
+
+### Phase 1: Core sailor operations
+Focus on race entry, results visibility, notifications, offline resilience, and operational race-day support.
+
+### Phase 2: Extended sailor experience
+Planned direction from the wider roadmap includes:
+- sailor stats
+- event entry
+
+### Phase 3 and beyond: Community and broader engagement
+Longer-term roadmap themes include:
+- community stats
+- social features
 
 ## Before running
-1. Open `mobile/sailor-android` in Android Studio.
-2. Let Gradle sync.
-3. Set backend URL in:
-   - `app/src/main/java/com/quicksail/sailor/api/Network.kt`
-   - Default is emulator local: `http://10.0.2.2:5000/`
-4. Ensure backend DB has sailor users seeded (e.g. `alice_test / ChangeMe123!`).
+1. Open the Android project in Android Studio.
+2. Let Gradle sync complete.
+3. Confirm the backend URL in the mobile network configuration.
+4. Start the backend and ensure the test dataset or seeded sailor users exist.
 
-## Windows / Linux sync
+## Windows and Linux sync
 
-If you work on the Android app from both the Windows repo copy and a WSL/Linux copy, keep them explicitly synced so edits do not drift.
+If you work from both the Windows repo copy and the WSL or Linux mirror, keep them explicitly in sync.
 
-- Repo copy: `mobile/sailor-android`
-- Current WSL copy expected by the sync helper: `/home/sjknight/mobile/sailor-android`
+- Repo copy: mobile/sailor-android
+- WSL mirror commonly used: /home/sjknight/mobile/sailor-android
+- Repo mirror used for Linux compile checks: /home/sjknight/Bartley-SC-App/mobile/sailor-android
 
-From Windows PowerShell at the repo root:
+From PowerShell at the repo root:
 
 - Push repo changes into WSL:
-  - `./sync_mobile_android.ps1 -Direction ToWsl`
+  - ./sync_mobile_android.ps1 -Direction ToWsl
 - Pull WSL changes back into the repo:
-  - `./sync_mobile_android.ps1 -Direction FromWsl`
+  - ./sync_mobile_android.ps1 -Direction FromWsl
 
-Optional overrides:
+The sync excludes machine-local and build output files such as .gradle, .idea, build, local.properties, and iml files.
 
-- Different distro:
-  - `./sync_mobile_android.ps1 -Direction ToWsl -WslDistro Ubuntu-24.04`
-- Different WSL path:
-  - `./sync_mobile_android.ps1 -Direction FromWsl -WslProjectPath /home/<user>/mobile/sailor-android`
+## Linux mirror build notes
 
-The sync excludes local machine files and build outputs such as `.gradle/`, `.idea/`, `build/`, `local.properties`, and `*.iml`.
-
-## Notes
-- Cookie storage is in-memory for now. Replace with persistent secure storage for production.
-- UI is intentionally minimal starter scaffolding.
+For WSL or Linux compilation to work reliably:
+- gradlew must be executable
+- the mirror needs a valid local.properties
+- sdk.dir should point at the local Android SDK, for example /home/sjknight/Android/Sdk
 
 ## Change backlog
 
-Desired changes and release backlog items for the Android app are now tracked centrally in [../../Changes.MD](../../Changes.MD).
+Desired changes and release backlog items for the Android app are tracked centrally in [Changes.MD](../../Changes.MD).

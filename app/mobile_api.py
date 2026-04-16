@@ -42,6 +42,7 @@ from services.mobile_repository import (
     update_sailor_profile,
 )
 from services.error_responses import error_payload_for_exception
+from club_dashboard_api import dashboard_sailors_boats, dashboard_series_results
 
 
 def _secs_to_hms(s):
@@ -105,13 +106,14 @@ def build_control_access_response(db, session_dict, sailor_has_active_role):
                 return {"ok": True, "can_race_control": False, "assigned_race_ids": []}, 200
 
             is_mobile_admin = sailor_has_active_role(conn, sailor_user_id, sailor_id, club_id, "club_admin")
-            assigned_race_ids = get_assigned_race_ids(conn, club_id, sailor_id)
+            open_races = get_control_upcoming_races_admin(conn, club_id)
+            open_race_ids = [row["race_id"] for row in open_races]
 
         return {
             "ok": True,
-            "can_race_control": bool(is_mobile_admin or assigned_race_ids),
+            "can_race_control": True,
             "is_mobile_admin": bool(is_mobile_admin),
-            "assigned_race_ids": assigned_race_ids,
+            "assigned_race_ids": open_race_ids,
         }, 200
     except Exception as exc:
         return error_payload_for_exception(exc)
@@ -448,6 +450,31 @@ def mobile_series_standings(db, sailor_id, session_dict):
         return error_payload_for_exception(e)
 
 
+def mobile_series_results(db, sailor_id, session_dict):
+    try:
+        with db.engine.connect() as conn:
+            club_id = session_dict.get("sailor_club_id")
+            if not club_id:
+                club_id = resolve_sailor_club_id(conn, sailor_id)
+                if club_id:
+                    session_dict["sailor_club_id"] = str(club_id)
+
+        if not club_id:
+            return {"ok": True, "series": [], "latest_series_id": None}, 200
+
+        payload, status = dashboard_series_results(db, club_id)
+        if status == 200:
+            filtered = [
+                item for item in (payload.get("series") or [])
+                if "pursuit" not in (item.get("series_name") or "").lower()
+            ]
+            payload["series"] = filtered
+            payload["latest_series_id"] = filtered[0].get("series_id") if filtered else None
+        return payload, status
+    except Exception as e:
+        return error_payload_for_exception(e)
+
+
 # ---------------------------------------------------------------------------
 # Race join & results
 # ---------------------------------------------------------------------------
@@ -506,35 +533,39 @@ def mobile_race_results(db, race_id, club_id, sailor_id):
                 "corrected_sec",
             )
 
+        my_results_payload = [
+            {
+                "entry_id": r["entry_id"],
+                "sailor": r["sailor"],
+                "boat": r["boat"],
+                "sail_number": r["sail_number"],
+                "lap_count": int(r["lap_count"]) if r.get("lap_count") else 0,
+                "position": position,
+                "elapsed_time": _secs_to_hms(r["elapsed_sec"]),
+                "corrected_time": _secs_to_hms(r["corrected_sec"]),
+                "dnf": dnf,
+            }
+            for r, position, dnf in _rank_finished_rows(my_results, "position", "elapsed_sec", "corrected_sec")
+        ]
+        leaderboard_payload = [
+            {
+                "sailor": r["sailor"],
+                "boat": r["boat"],
+                "sail_number": r["sail_number"],
+                "lap_count": int(r["lap_count"]) if r.get("lap_count") else 0,
+                "position": position,
+                "elapsed_time": _secs_to_hms(r["elapsed_sec"]),
+                "corrected_time": _secs_to_hms(r["corrected_sec"]),
+                "dnf": dnf,
+            }
+            for r, position, dnf in _rank_finished_rows(leaderboard, "position", "elapsed_sec", "corrected_sec")
+        ]
+
         return {
             "ok": True,
-            "my_results": [
-                {
-                    "entry_id": r["entry_id"],
-                    "sailor": r["sailor"],
-                    "boat": r["boat"],
-                    "sail_number": r["sail_number"],
-                    "lap_count": int(r["lap_count"]) if r.get("lap_count") else 0,
-                    "position": position,
-                    "elapsed_time": _secs_to_hms(r["elapsed_sec"]),
-                    "corrected_time": _secs_to_hms(r["corrected_sec"]),
-                    "dnf": dnf,
-                }
-                for r, position, dnf in _rank_finished_rows(my_results, "position", "elapsed_sec", "corrected_sec")
-            ],
-            "leaderboard": [
-                {
-                    "sailor": r["sailor"],
-                    "boat": r["boat"],
-                    "sail_number": r["sail_number"],
-                    "lap_count": int(r["lap_count"]) if r.get("lap_count") else 0,
-                    "position": position,
-                    "elapsed_time": _secs_to_hms(r["elapsed_sec"]),
-                    "corrected_time": _secs_to_hms(r["corrected_sec"]),
-                    "dnf": dnf,
-                }
-                for r, position, dnf in _rank_finished_rows(leaderboard, "position", "elapsed_sec", "corrected_sec")
-            ],
+            "my_results": leaderboard_payload or my_results_payload,
+            "leaderboard": leaderboard_payload,
+            "my_result_highlight": my_results_payload[0] if my_results_payload else None,
         }, 200
     except Exception as e:
         return error_payload_for_exception(e)
@@ -556,18 +587,31 @@ def mobile_control_upcoming_races(db, sailor_user_id, sailor_id, session_dict, s
             if not club_id:
                 return {"ok": True, "races": [], "can_race_control": False}, 200
 
-            is_mobile_admin = sailor_has_active_role(conn, sailor_user_id, sailor_id, club_id, "club_admin")
-
-            if is_mobile_admin:
-                rows = get_control_upcoming_races_admin(conn, club_id)
-            else:
-                rows = get_control_upcoming_races_duty(conn, club_id, sailor_id)
+            rows = get_control_upcoming_races_admin(conn, club_id)
 
         return {
             "ok": True,
             "races": [dict(r) for r in rows],
-            "can_race_control": bool(is_mobile_admin or rows),
+            "can_race_control": True,
         }, 200
+    except Exception as e:
+        return error_payload_for_exception(e)
+
+
+def mobile_control_options(db, sailor_id, session_dict):
+    try:
+        with db.engine.connect() as conn:
+            club_id = session_dict.get("sailor_club_id")
+            if not club_id:
+                club_id = resolve_sailor_club_id(conn, sailor_id)
+                if club_id:
+                    session_dict["sailor_club_id"] = str(club_id)
+
+        if not club_id:
+            return {"ok": True, "sailors": [], "boat_classes": []}, 200
+
+        payload, status = dashboard_sailors_boats(db, club_id)
+        return payload, status
     except Exception as e:
         return error_payload_for_exception(e)
 

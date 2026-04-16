@@ -4,8 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.quicksail.sailor.api.ClubSummary
 import com.quicksail.sailor.api.BoatClassSummary
+import com.quicksail.sailor.api.ControlSailorOption
 import com.quicksail.sailor.api.LeaderboardRow
 import com.quicksail.sailor.api.MobileLoginResponse
+import com.quicksail.sailor.api.MobileSeriesSummary
 import com.quicksail.sailor.api.Network
 import com.quicksail.sailor.api.RaceControlAddEntryRequest
 import com.quicksail.sailor.api.RaceControlEntry
@@ -26,6 +28,20 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+data class ResultDialogRow(
+    val badge: String,
+    val title: String,
+    val subtitle: String? = null,
+    val detailLeft: String? = null,
+    val detailRight: String? = null,
+    val footer: String? = null,
+)
+
+data class ResultDialogSection(
+    val title: String,
+    val rows: List<ResultDialogRow> = emptyList()
+)
 
 data class SailorUiState(
     val loading: Boolean = false,
@@ -48,9 +64,12 @@ data class SailorUiState(
     val series: List<SeriesSummary> = emptyList(),
     val boats: List<SailorBoat> = emptyList(),
     val races: List<UpcomingRace> = emptyList(),
+    val resultDialogTitle: String = "",
+    val resultDialogSections: List<ResultDialogSection> = emptyList(),
     val myResultText: String = "",
     val controlRaces: List<RaceControlRace> = emptyList(),
     val controlEntries: List<RaceControlEntry> = emptyList(),
+    val controlSailors: List<ControlSailorOption> = emptyList(),
     val selectedControlRaceId: Long? = null,
     val controlRaceActive: Boolean = false,
     val controlSummaryRace: RaceSummaryRaceInfo? = null,
@@ -65,6 +84,7 @@ data class SailorUiState(
     val dashboardLatestResult: DashboardLatestResult? = null,
     val dashboardSeriesPositions: List<DashboardSeriesPosition> = emptyList(),
     val clubSeriesStandings: List<SeriesStandingRow> = emptyList(),
+    val seriesResultsDirectory: List<MobileSeriesSummary> = emptyList(),
     val dashboardLastUpdatedAt: Long? = null,
     val racesLastUpdatedAt: Long? = null,
     val pendingActionsCount: Int = 0,
@@ -87,6 +107,33 @@ class SailorViewModel : ViewModel() {
         }
     }
 
+    private fun normalizeDashboardPayload(payload: com.quicksail.sailor.api.DashboardResponse): com.quicksail.sailor.api.DashboardResponse {
+        val filteredCompleted = payload.completed_races
+            .filterNot { it.series_name.contains("pursuit", ignoreCase = true) }
+        val latestDay = filteredCompleted
+            .mapNotNull { it.started_at?.substringBefore("T")?.substringBefore(" ") }
+            .maxOrNull()
+        val latestCompleted = if (latestDay == null) {
+            emptyList()
+        } else {
+            filteredCompleted.filter { it.started_at?.substringBefore("T")?.substringBefore(" ") == latestDay }
+        }
+
+        val latestDayResults = payload.latest_day_results
+            .filterNot { it.series_name.contains("pursuit", ignoreCase = true) }
+        val latestResult = latestDayResults.firstOrNull()
+            ?: payload.latest_result?.takeUnless { it.series_name.contains("pursuit", ignoreCase = true) }
+        val seriesPositions = payload.series_positions
+            .filterNot { it.series_name.contains("pursuit", ignoreCase = true) }
+
+        return payload.copy(
+            completed_races = latestCompleted,
+            latest_day_results = latestDayResults,
+            latest_result = latestResult,
+            series_positions = seriesPositions
+        )
+    }
+
     init {
         val (savedPage, savedScroll) = Network.loadUiContinuity()
         _state.value = _state.value.copy(
@@ -101,7 +148,7 @@ class SailorViewModel : ViewModel() {
 
     private fun preloadCachedData() {
         Network.loadDashboardCache()?.let { cached ->
-            val payload = cached.data
+            val payload = normalizeDashboardPayload(cached.data)
             _state.value = _state.value.copy(
                 dashboardUpcomingRaces = payload.upcoming_races,
                 dashboardCompletedRaces = payload.completed_races,
@@ -169,6 +216,7 @@ class SailorViewModel : ViewModel() {
             refreshSeries()
             refreshRaces()
             loadControlAccess()
+            loadControlOptions()
             loadControlRaces()
             loadDashboard()
             loadClubSeriesStandings()
@@ -213,6 +261,7 @@ class SailorViewModel : ViewModel() {
                     refreshRaces()
                     refreshSeries()
                     loadControlAccess()
+                    loadControlOptions()
                     loadControlRaces()
                     loadDashboard()
                     loadClubSeriesStandings()
@@ -248,6 +297,7 @@ class SailorViewModel : ViewModel() {
                     refreshRaces()
                     refreshSeries()
                     loadControlAccess()
+                    loadControlOptions()
                     loadControlRaces()
                     loadDashboard()
                     loadClubSeriesStandings()
@@ -341,22 +391,23 @@ class SailorViewModel : ViewModel() {
         runCatching { Network.api.dashboard() }
             .onSuccess {
                 if (it.ok) {
+                    val payload = normalizeDashboardPayload(it)
                     val updatedAt = System.currentTimeMillis()
-                    Network.saveDashboardCache(it)
+                    Network.saveDashboardCache(payload)
                     _state.value = _state.value.copy(
                         dashboardLoading = false,
-                        dashboardUpcomingRaces = it.upcoming_races,
-                        dashboardCompletedRaces = it.completed_races,
-                        dashboardLatestDayResults = it.latest_day_results,
-                        dashboardLatestResult = it.latest_result,
-                        dashboardSeriesPositions = it.series_positions,
+                        dashboardUpcomingRaces = payload.upcoming_races,
+                        dashboardCompletedRaces = payload.completed_races,
+                        dashboardLatestDayResults = payload.latest_day_results,
+                        dashboardLatestResult = payload.latest_result,
+                        dashboardSeriesPositions = payload.series_positions,
                         dashboardLastUpdatedAt = updatedAt,
                         dashboardError = null
                     )
                     NotificationCenter.onDashboardUpdated(
-                        upcomingRaces = it.upcoming_races,
-                        latestDayResults = it.latest_day_results,
-                        latestResult = it.latest_result
+                        upcomingRaces = payload.upcoming_races,
+                        latestDayResults = payload.latest_day_results,
+                        latestResult = payload.latest_result
                     )
                     syncPendingActionsInBackground()
                 } else {
@@ -374,7 +425,7 @@ class SailorViewModel : ViewModel() {
                     else -> safeNetworkMessage("Unable to load dashboard right now.", it)
                 }
                 if (cached != null) {
-                    val payload = cached.data
+                    val payload = normalizeDashboardPayload(cached.data)
                     _state.value = _state.value.copy(
                         dashboardLoading = false,
                         dashboardError = msg,
@@ -397,13 +448,14 @@ class SailorViewModel : ViewModel() {
         runCatching { Network.api.seriesStandings() }
             .onSuccess {
                 if (it.ok) {
+                    val standings = it.standings.filterNot { row -> row.series_name.contains("pursuit", ignoreCase = true) }
                     _state.value = _state.value.copy(
                         seriesLoading = false,
                         seriesError = null,
-                        clubSeriesStandings = it.standings
+                        clubSeriesStandings = standings
                     )
                     NotificationCenter.onSeriesStandingsUpdated(
-                        standings = it.standings,
+                        standings = standings,
                         upcomingRaces = _state.value.dashboardUpcomingRaces
                     )
                 } else {
@@ -417,6 +469,31 @@ class SailorViewModel : ViewModel() {
                 _state.value = _state.value.copy(
                     seriesLoading = false,
                     seriesError = safeNetworkMessage("Unable to load series standings", it)
+                )
+            }
+    }
+
+    fun loadSeriesResultsDirectory() = viewModelScope.launch {
+        _state.value = _state.value.copy(seriesLoading = true, seriesError = null)
+        runCatching { Network.api.seriesResultsDirectory() }
+            .onSuccess {
+                if (it.ok) {
+                    _state.value = _state.value.copy(
+                        seriesLoading = false,
+                        seriesError = null,
+                        seriesResultsDirectory = it.series.filterNot { row -> row.series_name.contains("pursuit", ignoreCase = true) }
+                    )
+                } else {
+                    _state.value = _state.value.copy(
+                        seriesLoading = false,
+                        seriesError = it.error ?: "Unable to load series results"
+                    )
+                }
+            }
+            .onFailure {
+                _state.value = _state.value.copy(
+                    seriesLoading = false,
+                    seriesError = safeNetworkMessage("Unable to load series results", it)
                 )
             }
     }
@@ -601,6 +678,27 @@ class SailorViewModel : ViewModel() {
                     isMobileAdmin = false,
                     assignedControlRaceIds = emptyList(),
                     controlError = safeNetworkMessage("Unable to load race-control access", it)
+                )
+            }
+    }
+
+    fun loadControlOptions() = viewModelScope.launch {
+        runCatching { Network.api.controlOptions() }
+            .onSuccess {
+                if (it.ok) {
+                    _state.value = _state.value.copy(
+                        controlSailors = it.sailors,
+                        controlError = null
+                    )
+                } else {
+                    _state.value = _state.value.copy(
+                        controlError = it.error ?: "Unable to load sailor and boat options"
+                    )
+                }
+            }
+            .onFailure {
+                _state.value = _state.value.copy(
+                    controlError = safeNetworkMessage("Unable to load sailor and boat options", it)
                 )
             }
     }
@@ -894,14 +992,49 @@ class SailorViewModel : ViewModel() {
         runCatching { Network.api.raceResults(raceId) }
             .onSuccess {
                 if (it.ok) {
-                    val text = if (it.my_results.isEmpty()) {
-                        "No result recorded yet."
-                    } else {
-                        it.my_results.joinToString("\n") { r ->
-                            "${r.sailor} | Pos ${r.position ?: "-"} | Elapsed ${r.elapsed_time ?: "-"} | Corrected ${r.corrected_time ?: "-"}"
-                        }
+                    val sections = mutableListOf<ResultDialogSection>()
+                    val sameAsLeaderboard = it.leaderboard.isNotEmpty() &&
+                        it.my_results.size == it.leaderboard.size &&
+                        it.my_results.map { row -> listOf(row.sailor, row.position, row.corrected_time) } ==
+                        it.leaderboard.map { row -> listOf(row.sailor, row.position, row.corrected_time) }
+
+                    if (it.my_results.isNotEmpty() && !sameAsLeaderboard) {
+                        sections += ResultDialogSection(
+                            title = "My result",
+                            rows = it.my_results.map { r ->
+                                ResultDialogRow(
+                                    badge = r.position?.toString() ?: if (r.dnf) "DNF" else "-",
+                                    title = r.sailor,
+                                    subtitle = "${r.boat} · Sail ${r.sail_number}",
+                                    detailLeft = "Elapsed ${r.elapsed_time ?: "-"}",
+                                    detailRight = "Corrected ${r.corrected_time ?: "-"}",
+                                    footer = if (r.dnf) "Did not finish" else null
+                                )
+                            }
+                        )
                     }
-                    _state.value = _state.value.copy(myResultText = text)
+
+                    if (it.leaderboard.isNotEmpty()) {
+                        sections += ResultDialogSection(
+                            title = "Full results",
+                            rows = it.leaderboard.map { r ->
+                                ResultDialogRow(
+                                    badge = r.position?.toString() ?: if (r.dnf) "DNF" else "-",
+                                    title = r.sailor,
+                                    subtitle = "${r.boat} · Sail ${r.sail_number}",
+                                    detailLeft = "Elapsed ${r.elapsed_time ?: "-"}",
+                                    detailRight = "Corrected ${r.corrected_time ?: "-"}",
+                                    footer = if (r.dnf) "Did not finish" else null
+                                )
+                            }
+                        )
+                    }
+
+                    _state.value = _state.value.copy(
+                        resultDialogTitle = "Race Results",
+                        resultDialogSections = sections,
+                        myResultText = if (sections.isEmpty()) "No result recorded yet." else ""
+                    )
                 } else {
                     _state.value = _state.value.copy(error = it.error)
                 }
@@ -911,7 +1044,44 @@ class SailorViewModel : ViewModel() {
             }
     }
 
+    fun loadSeriesResults(seriesId: Long, seriesName: String) = viewModelScope.launch {
+        val existing = _state.value.clubSeriesStandings
+        val rows = if (existing.isNotEmpty()) {
+            existing
+        } else {
+            runCatching { Network.api.seriesStandings() }
+                .getOrNull()
+                ?.takeIf { it.ok }
+                ?.standings
+                .orEmpty()
+        }
+
+        val filtered = rows.filter { it.series_id == seriesId }.sortedBy { it.rank }
+        _state.value = _state.value.copy(
+            resultDialogTitle = seriesName,
+            resultDialogSections = if (filtered.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(
+                    ResultDialogSection(
+                        title = "Standings",
+                        rows = filtered.map { row ->
+                            ResultDialogRow(
+                                badge = row.rank.toString(),
+                                title = row.sailor_name,
+                                detailLeft = "${row.points} pts",
+                                detailRight = "${row.races_completed} races"
+                            )
+                        }
+                    )
+                )
+            },
+            myResultText = if (filtered.isEmpty()) "No series standings available yet." else "",
+            clubSeriesStandings = if (existing.isEmpty()) rows else existing
+        )
+    }
+
     fun clearMyResults() {
-        _state.value = _state.value.copy(myResultText = "")
+        _state.value = _state.value.copy(resultDialogTitle = "", resultDialogSections = emptyList(), myResultText = "")
     }
 }

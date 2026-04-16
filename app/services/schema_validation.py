@@ -189,6 +189,12 @@ def validate_mobile_register_payload(payload):
     if not username or not password or not first_name:
         raise ValueError("username, password, and first_name are required")
 
+    has_upper = any(ch.isupper() for ch in password)
+    has_lower = any(ch.islower() for ch in password)
+    has_digit = any(ch.isdigit() for ch in password)
+    if len(password) < 10 or not (has_upper and has_lower and has_digit):
+        raise ValueError("Password must be at least 10 characters long and include upper-case, lower-case, and numeric characters")
+
     return {
         "username": username,
         "password": password,

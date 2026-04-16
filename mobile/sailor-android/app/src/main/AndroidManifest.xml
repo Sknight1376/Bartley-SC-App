@@ -7,9 +7,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="Sailor App"
+        android:label="Layline"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
@@ -27,6 +27,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.quicksail.sailor.DUTY_ALARM" />
+                <action android:name="com.quicksail.sailor.RACE_REMINDER" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>

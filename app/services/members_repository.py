@@ -152,11 +152,27 @@ def link_app_user_to_member(conn, sailor_user_id, target_sailor_id, club_id):
         '''),
         {"target_sailor_id": target_sailor_id, "sailor_user_id": sailor_user_id}
     )
+
+    conn.execute(
+        text('''
+            UPDATE "RACINGAPP"."SAILOR_ROLE_GRANT"
+            SET sailor = :target_sailor_id,
+                club = COALESCE(club, :club_id)
+            WHERE sailor_user = :sailor_user_id
+              AND sailor = :old_sailor_id
+        '''),
+        {
+            "target_sailor_id": target_sailor_id,
+            "club_id": club_id,
+            "sailor_user_id": sailor_user_id,
+            "old_sailor_id": old_sailor_id,
+        }
+    )
     return old_sailor_id
 
 
 def delete_orphaned_sailor(conn, sailor_id, club_id):
-    """Delete a SAILORCONTROL record only when it has no boats and no app account."""
+    """Delete a SAILORCONTROL record only when it no longer has related data."""
     boat_count = conn.execute(
         text('SELECT COUNT(*) FROM "RACINGAPP"."BOATCONTROL" WHERE sailor = :sid'),
         {"sid": sailor_id}
@@ -165,8 +181,16 @@ def delete_orphaned_sailor(conn, sailor_id, club_id):
         text('SELECT COUNT(*) FROM "RACINGAPP"."SAILORUSER" WHERE sailor = :sid'),
         {"sid": sailor_id}
     ).scalar() or 0
-    if boat_count > 0 or user_count > 0:
-        raise ValueError("Sailor still has boats or an app account; not deleted")
+    role_grant_count = conn.execute(
+        text('SELECT COUNT(*) FROM "RACINGAPP"."SAILOR_ROLE_GRANT" WHERE sailor = :sid'),
+        {"sid": sailor_id}
+    ).scalar() or 0
+    duty_count = conn.execute(
+        text('SELECT COUNT(*) FROM "RACINGAPP"."RACE_DUTY_ASSIGNMENT" WHERE sailor = :sid'),
+        {"sid": sailor_id}
+    ).scalar() or 0
+    if boat_count > 0 or user_count > 0 or role_grant_count > 0 or duty_count > 0:
+        raise ValueError("Sailor still has related records; not deleted")
     conn.execute(
         text('DELETE FROM "RACINGAPP"."SAILORCONTROL" WHERE key = :sid AND club = :club_id'),
         {"sid": sailor_id, "club_id": club_id}

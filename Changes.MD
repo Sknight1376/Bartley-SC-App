@@ -9,6 +9,71 @@ Priority levels:
 
 ---
 
+## Phase 1 sign-off checklist
+
+Use this as the final close-out list for the MVP.
+
+- [ ] Run full end-to-end acceptance test across the web and mobile Phase 1 journeys
+  - [x] Add automated smoke coverage for intro, health, web admin dashboard, and mobile core endpoints
+  - [x] Baseline verification complete: 5 automated acceptance and regression tests passing
+  - [ ] Complete the final manual browser and device walkthrough for sign-off
+    1. In the browser, sign in as a club admin and confirm the landing page and club dashboard both load correctly.
+    2. Create or select a race and confirm the sailor-entry and race-control flow opens without missing fields or broken buttons.
+    3. Add or amend race entries and confirm the review queue and series results update as expected.
+    4. On the mobile app, sign in as a linked sailor and verify profile, boats, dashboard, races, and series pages all load.
+    5. Join an upcoming race and confirm the joined state is reflected after refresh.
+    6. Open a recent result and confirm the full results view is readable and complete.
+    7. Confirm notifications, offline cues, and reconnect behavior are consistent with the separate sign-off scripts below.
+    8. Record any remaining cosmetic-only issues as Phase 1.1 items rather than MVP blockers.
+- [ ] Validate race-day flow on real devices and under intermittent connectivity
+- [ ] Confirm notification behavior for upcoming race reminders, results published, and personal result summaries
+  - [x] Phase 1 notification handlers are implemented for upcoming reminders, results published, and personal result summaries
+  - [x] Android build verification completed successfully after notification updates
+  - [ ] Run the manual notification script on device:
+    1. Confirm notification permission is enabled for the app in Android settings.
+    2. Open the app and verify the notification toggles are enabled for upcoming races, results, and related alerts.
+    3. Use the in-app notification test path or a seeded scenario to trigger a sample upcoming race reminder.
+    4. Confirm the notification appears and tapping it returns to the app cleanly.
+    5. Trigger or simulate a newly published race result.
+    6. Confirm a results-published notification appears with sensible race details.
+    7. Confirm a personal result summary notification appears when the sailor has a recorded placing.
+    8. Disable one notification type, repeat the trigger, and confirm that alert no longer appears.
+- [ ] Confirm offline cache restore and queued action sync after reconnect
+  - [x] Verified offline support code path for cached dashboard and race data, queued actions, and reconnect sync triggers
+  - [x] Added Android unit coverage for offline error classification and offline queue availability
+  - [x] Android unit test task completed successfully in the Linux mirror
+  - [ ] Complete final manual airplane-mode and reconnect walkthrough on device
+    1. Open the app while online and confirm the dashboard and races list load successfully.
+    2. Join an upcoming race or perform a race-control action to establish current state.
+    3. Switch the phone to airplane mode and reopen the dashboard and races pages.
+    4. Confirm cached content still appears and an offline message is shown rather than a crash.
+    5. While still offline, attempt a supported queued action and confirm the success message says it will sync automatically.
+    6. Turn connectivity back on and refresh the app.
+    7. Confirm the queued action clears, the pending count drops, and the refreshed state matches the server.
+    8. Repeat once with the app fully closed and reopened to confirm restore behavior across restart.
+- [ ] Verify Windows and WSL/Linux mobile build paths remain in sync and repeatable
+  - [x] Linux mirror compile and unit-test flow currently succeeds
+  - [ ] Confirm the same flow from the primary Windows Android Studio environment
+- [ ] Review deployment configuration, secrets handling, and rollback steps for go-live readiness
+  - [x] Added production deployment scaffolding with Gunicorn, environment-based cookie hardening, and a production compose override
+  - [x] Added a repo-specific deployment quickstart and production environment template
+  - [x] Verified the backend acceptance and regression suite still passes after deployment hardening changes
+  - [x] Added a mobile app route-to-production checklist covering release config, signing, real-device validation, and staged rollout
+  - [x] Added backend login rate limiting for admin and mobile authentication
+  - [x] Enforced stronger password requirements for mobile registration
+  - [x] Disabled Android backup export and blocked public database port exposure in the production compose setup
+  - [x] Added same-origin CSRF protection for web-admin write requests
+  - [x] Enabled Android release shrinking/obfuscation and added release keep rules
+  - [x] Final automated readiness verification completed: 8 backend tests passing, local health endpoint healthy, and Android release build successful
+  - [ ] Choose hosting option for first live release and provision staging and production environments
+  - [ ] Rotate all secrets and admin passwords before cutover
+  - [ ] Set the production mobile API URL, release version, and signing configuration for the first Android release
+  - [ ] Run the first staging deployment and smoke test it end to end
+  - [ ] Publish the mobile app to an internal or closed testing track before wider release
+- [ ] Mark any remaining non-blocking items as Phase 1.1 or Phase 2 so MVP scope stays clean
+
+---
+
 ## ✅ Completed
 
 ### Web

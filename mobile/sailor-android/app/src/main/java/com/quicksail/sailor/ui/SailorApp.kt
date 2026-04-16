@@ -1,7 +1,9 @@
 package com.quicksail.sailor.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -37,6 +40,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.ExperimentalMaterialApi
@@ -60,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -72,9 +77,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.quicksail.sailor.R
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.quicksail.sailor.api.BoatClassSummary
 import com.quicksail.sailor.api.ClubSummary
+import com.quicksail.sailor.api.ControlSailorOption
 import com.quicksail.sailor.api.Network
 import com.quicksail.sailor.notifications.NotificationCenter
 import kotlinx.coroutines.delay
@@ -158,16 +168,21 @@ private fun AuthPage(state: SailorUiState, vm: SailorViewModel) {
                     .padding(vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Image(
+                    painter = painterResource(id = R.drawable.layline_logo),
+                    contentDescription = "Layline logo",
+                    modifier = Modifier.size(112.dp)
+                )
                 Text(
-                    "⛵ QuickSail",
+                    "Layline",
                     style = MaterialTheme.typography.headlineLarge,
                     color = MaterialTheme.colorScheme.primary,
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    "Sailor",
+                    "Sailor app",
                     style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.secondary
                 )
             }
 
@@ -527,6 +542,7 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                 HomePage.SERIES_RESULTS -> vm.loadClubSeriesStandings()
                 HomePage.RACE_CONTROL -> {
                     vm.refreshRaces()
+                    vm.loadControlOptions()
                     vm.loadControlRaces()
                     state.selectedControlRaceId?.let { vm.loadControlEntries(it) }
                 }
@@ -539,7 +555,11 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
         when (page) {
             HomePage.DASHBOARD -> vm.loadDashboard()
             HomePage.SERIES_RESULTS -> vm.loadClubSeriesStandings()
-            HomePage.RACE_CONTROL -> vm.refreshRaces()
+            HomePage.RACE_CONTROL -> {
+                vm.loadControlAccess()
+                vm.loadControlOptions()
+                vm.loadControlRaces()
+            }
             HomePage.PROFILE -> Unit
         }
     }
@@ -590,6 +610,11 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
+                        Text(
+                            "Layline",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
                         Text(
                             "${state.profile?.first_name ?: "Sailor"}",
                             style = MaterialTheme.typography.headlineMedium
@@ -722,22 +747,125 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                 modifier = Modifier.align(Alignment.TopCenter)
             )
 
-            if (state.myResultText.isNotBlank()) {
-                AlertDialog(
-                    onDismissRequest = { vm.clearMyResults() },
-                    title = { Text("Race Result", modifier = Modifier.semantics { heading() }) },
-                    text = {
-                        Text(
-                            state.myResultText,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { vm.clearMyResults() }) {
-                            Text("Close")
-                        }
+            if (state.resultDialogSections.isNotEmpty() || state.myResultText.isNotBlank()) {
+                ResultsDialog(state = state, onDismiss = { vm.clearMyResults() })
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultsDialog(state: SailorUiState, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        state.resultDialogTitle.ifBlank { "Results" },
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f).semantics { heading() }
+                    )
+                    TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("Close")
                     }
+                }
+
+                HorizontalDivider()
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 560.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (state.resultDialogSections.isNotEmpty()) {
+                        state.resultDialogSections.forEach { section ->
+                            Text(
+                                section.title,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            section.rows.forEach { row ->
+                                ResultRowCard(row)
+                            }
+                        }
+                    } else {
+                        Text(state.myResultText, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultRowCard(row: ResultDialogRow) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Box(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    row.badge,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(row.title, style = MaterialTheme.typography.bodyMedium)
+                if (!row.subtitle.isNullOrBlank()) {
+                    Text(
+                        row.subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (!row.detailLeft.isNullOrBlank() || !row.detailRight.isNullOrBlank()) {
+                    Text(
+                        listOfNotNull(row.detailLeft, row.detailRight).joinToString(" • "),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                if (!row.footer.isNullOrBlank()) {
+                    Text(
+                        row.footer,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
     }
@@ -898,7 +1026,7 @@ private fun DashboardPage(state: SailorUiState, vm: SailorViewModel) {
             }
         }
 
-        Text("Latest Races", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+        Text("Latest Results", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
         if (state.dashboardLoading && state.dashboardCompletedRaces.isEmpty()) {
             repeat(2) {
                 SkeletonRaceCard()
@@ -910,10 +1038,11 @@ private fun DashboardPage(state: SailorUiState, vm: SailorViewModel) {
                     .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
                     .padding(12.dp)
             ) {
-                Text("No recent races yet.")
+                Text("No club results available yet.")
             }
         } else {
             val groupedLatestRaces = state.dashboardCompletedRaces
+                .filterNot { it.series_name.contains("pursuit", ignoreCase = true) }
                 .sortedByDescending { it.started_at ?: "" }
                 .groupBy { raceDateLabel(it.started_at) }
 
@@ -935,7 +1064,8 @@ private fun DashboardPage(state: SailorUiState, vm: SailorViewModel) {
             }
         }
 
-        Text("My Latest Result", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+        Text("My Latest Races", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+        Text("Tap any card to view the full race results.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val latestDayResults = state.dashboardLatestDayResults
         val latest = state.dashboardLatestResult
         if (latestDayResults.isEmpty() && latest == null) {
@@ -945,7 +1075,7 @@ private fun DashboardPage(state: SailorUiState, vm: SailorViewModel) {
                     .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
                     .padding(12.dp)
             ) {
-                Text("No race results yet.")
+                Text("No recent races for this sailor yet.")
             }
         } else {
             val latestDayLabel = raceDateLabel((latestDayResults.firstOrNull() ?: latest)?.started_at)
@@ -1013,48 +1143,27 @@ private fun DashboardPage(state: SailorUiState, vm: SailorViewModel) {
             }
         }
 
-        Text("My Current Series Positions", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
-        if (state.dashboardLoading && state.dashboardSeriesPositions.isEmpty()) {
-            repeat(2) {
-                SkeletonResultRow()
-            }
-        } else if (state.dashboardSeriesPositions.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                    .padding(12.dp)
-            ) {
-                Text("No current series positions yet.")
-            }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                state.dashboardSeriesPositions.forEach { row ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(row.series_name, style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "P${row.rank}/${row.sailors_count} (${row.races_completed} races)",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
 @Composable
 private fun SeriesResultsPage(state: SailorUiState, vm: SailorViewModel) {
+    var selectedSeriesId by rememberSaveable { mutableLongStateOf(0L) }
+    var seriesExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.seriesResultsDirectory.isEmpty(), state.seriesLoading) {
+        if (state.seriesResultsDirectory.isEmpty() && !state.seriesLoading) {
+            vm.loadSeriesResultsDirectory()
+        }
+    }
+
+    LaunchedEffect(state.seriesResultsDirectory) {
+        val firstId = state.seriesResultsDirectory.firstOrNull()?.series_id ?: 0L
+        if (firstId != 0L && state.seriesResultsDirectory.none { it.series_id == selectedSeriesId }) {
+            selectedSeriesId = firstId
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1062,10 +1171,10 @@ private fun SeriesResultsPage(state: SailorUiState, vm: SailorViewModel) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Club Series Results", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-            TextButton(onClick = { vm.loadClubSeriesStandings() }) { Text("Refresh") }
+            TextButton(onClick = { vm.loadSeriesResultsDirectory() }) { Text("Refresh") }
         }
 
-        if (state.seriesLoading && state.clubSeriesStandings.isEmpty()) {
+        if (state.seriesLoading && state.seriesResultsDirectory.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1095,7 +1204,7 @@ private fun SeriesResultsPage(state: SailorUiState, vm: SailorViewModel) {
             }
         }
 
-        if (state.clubSeriesStandings.isEmpty()) {
+        if (state.seriesResultsDirectory.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1107,28 +1216,150 @@ private fun SeriesResultsPage(state: SailorUiState, vm: SailorViewModel) {
             return@Column
         }
 
-        val grouped = state.clubSeriesStandings.groupBy { it.series_name }
-        grouped.forEach { (seriesName, rows) ->
+        val selectedSeries = state.seriesResultsDirectory.firstOrNull { it.series_id == selectedSeriesId }
+            ?: state.seriesResultsDirectory.first()
+
+        Box {
+            OutlinedTextField(
+                value = selectedSeries.series_name,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Series") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            TextButton(
+                onClick = { seriesExpanded = true },
+                modifier = Modifier
+                    .matchParentSize()
+                    .clearAndSetSemantics {
+                        contentDescription = "Choose series"
+                        role = Role.Button
+                    }
+            ) { Text("") }
+            DropdownMenu(expanded = seriesExpanded, onDismissRequest = { seriesExpanded = false }) {
+                state.seriesResultsDirectory.forEach { item ->
+                    DropdownMenuItem(
+                        text = { Text(item.series_name) },
+                        onClick = {
+                            selectedSeriesId = item.series_id
+                            seriesExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
+                .padding(12.dp)
+        ) {
+            Text(
+                "Latest race ${formatRaceDateTime(selectedSeries.latest_started_at)} · ${selectedSeries.race_count} races · ${selectedSeries.discard_count} discards",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+
+        Text("Overall standings", style = MaterialTheme.typography.titleSmall)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                .padding(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SeriesTableCell("Rank", 56.dp, true)
+                    SeriesTableCell("Sailor", 140.dp, true)
+                    selectedSeries.races.forEach { race ->
+                        SeriesTableCell("R${race.race_no}", 58.dp, true)
+                    }
+                    SeriesTableCell("Total", 70.dp, true)
+                    SeriesTableCell("Sailed", 62.dp, true)
+                }
+
+                selectedSeries.results.forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SeriesTableCell(row.rank.toString(), 56.dp)
+                        SeriesTableCell(row.sailor_name, 140.dp)
+                        row.race_results.forEach { result ->
+                            SeriesTableCell(result.text ?: "", 58.dp, muted = result.discarded)
+                        }
+                        SeriesTableCell(row.points_text ?: (row.points?.toString() ?: ""), 70.dp, emphasized = true)
+                        SeriesTableCell(row.races_completed.toString(), 62.dp)
+                    }
+                }
+            }
+        }
+
+        Text("Race-by-race details", style = MaterialTheme.typography.titleSmall)
+        selectedSeries.race_sections.forEach { race ->
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
                     .padding(12.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(seriesName, style = MaterialTheme.typography.titleSmall)
-                    rows.sortedBy { it.rank }.forEach { row ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Race ${race.race_no} · ${formatRaceDateTime(race.started_at)}", style = MaterialTheme.typography.bodyMedium)
+                    Text("Entries ${race.entry_count}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    race.results.forEach { result ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp))
+                                .padding(10.dp)
                         ) {
-                            Text("${row.rank}. ${row.sailor_name}", style = MaterialTheme.typography.bodySmall)
-                            Text("${row.points} pts (${row.races_completed})", style = MaterialTheme.typography.labelSmall)
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("${result.rank_text ?: "-"} ${result.sailor_name}", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    listOfNotNull(result.boat_name, result.sail_number?.takeIf { it.isNotBlank() }?.let { "Sail $it" }).joinToString(" · "),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "Elapsed ${result.elapsed_time ?: "-"} · Corrected ${result.corrected_time ?: "-"} · Points ${result.points ?: "-"}",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SeriesTableCell(
+    text: String,
+    width: androidx.compose.ui.unit.Dp,
+    emphasized: Boolean = false,
+    muted: Boolean = false
+) {
+    Box(
+        modifier = Modifier
+            .width(width)
+            .background(
+                if (emphasized) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                RoundedCornerShape(6.dp)
+            )
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text.ifBlank { "-" },
+            style = MaterialTheme.typography.labelSmall,
+            color = when {
+                emphasized -> MaterialTheme.colorScheme.onPrimaryContainer
+                muted -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> MaterialTheme.colorScheme.onSurface
+            }
+        )
     }
 }
 
@@ -1591,17 +1822,25 @@ private fun RaceRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
                 Text("Race #${race.race_no}", style = MaterialTheme.typography.bodyMedium)
                 Text(race.series_name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
                 if (!race.started_at.isNullOrBlank()) {
-                    Text(race.started_at, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        formatRaceDateTime(race.started_at),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
             Text(
                 race.status.uppercase(),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (race.joined) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                color = if (race.joined) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 8.dp)
             )
         }
         
@@ -1720,7 +1959,7 @@ private fun RaceTabSection(state: SailorUiState, vm: SailorViewModel) {
                 modifier = Modifier.semantics { heading() }
             )
 
-            if (state.races.isEmpty()) {
+            if (state.controlLoading && state.controlRaces.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1728,18 +1967,27 @@ private fun RaceTabSection(state: SailorUiState, vm: SailorViewModel) {
                         .padding(12.dp)
                 ) {
                     Text(
-                        "No upcoming races. Pull to refresh.",
+                        "Loading available races…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            } else if (state.controlRaces.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        "No race-control races available right now. Pull to refresh.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             } else {
-                state.races.forEach { race ->
+                state.controlRaces.forEach { race ->
                     val startMs = parseStartedAtMs(race.started_at)
-                    // Enable when race is active OR scheduled start ≤ 10 minutes away (and not more than 2 hours past)
-                    val minutesUntilStart = if (startMs != null) (startMs - nowMs) / 60_000L else null
-                    val canOpen = race.status == "active" ||
-                        (minutesUntilStart != null && minutesUntilStart <= 10L && minutesUntilStart >= -120L)
                     val countdownText = startMs?.let { formatRaceCountdown(it, nowMs) } ?: ""
 
                     Box(
@@ -1761,7 +2009,7 @@ private fun RaceTabSection(state: SailorUiState, vm: SailorViewModel) {
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     if (!race.started_at.isNullOrBlank()) {
                                         Text(
-                                            race.started_at,
+                                            formatRaceDateTime(race.started_at),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
@@ -1770,8 +2018,7 @@ private fun RaceTabSection(state: SailorUiState, vm: SailorViewModel) {
                                         Text(
                                             countdownText,
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (canOpen) MaterialTheme.colorScheme.primary
-                                                    else MaterialTheme.colorScheme.onSurface
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                 }
@@ -1781,7 +2028,7 @@ private fun RaceTabSection(state: SailorUiState, vm: SailorViewModel) {
                                         vm.loadControlEntries(race.race_id)
                                         controlOpen = true
                                     },
-                                    enabled = canOpen,
+                                    enabled = true,
                                     modifier = Modifier.heightIn(min = 48.dp)
                                 ) {
                                     Text("Open")
@@ -2102,6 +2349,12 @@ private fun RaceControlSection(state: SailorUiState, vm: SailorViewModel) {
 
         if (showAddEntryDialog) {
             AddControlEntryDialog(
+                sailors = state.controlSailors,
+                boatClasses = state.boatClasses,
+                onReloadOptions = {
+                    vm.loadControlOptions()
+                    if (state.boatClasses.isEmpty()) vm.loadBoatClasses()
+                },
                 onDismiss = { showAddEntryDialog = false },
                 onSave = { sailor, boat, sailNumber, handicap ->
                     val raceId = state.selectedControlRaceId ?: return@AddControlEntryDialog
@@ -2115,13 +2368,35 @@ private fun RaceControlSection(state: SailorUiState, vm: SailorViewModel) {
 
 @Composable
 private fun AddControlEntryDialog(
+    sailors: List<ControlSailorOption>,
+    boatClasses: List<BoatClassSummary>,
+    onReloadOptions: () -> Unit,
     onDismiss: () -> Unit,
     onSave: (String, String, String, Int?) -> Unit
 ) {
-    var sailor by remember { mutableStateOf("") }
+    var sailorExpanded by remember { mutableStateOf(false) }
+    var boatExpanded by remember { mutableStateOf(false) }
+    var selectedSailorId by remember(sailors) { mutableStateOf(sailors.firstOrNull()?.sailor_id) }
+    var sailor by remember(sailors) { mutableStateOf(sailors.firstOrNull()?.name.orEmpty()) }
     var boat by remember { mutableStateOf("") }
     var sailNumber by remember { mutableStateOf("") }
     var handicap by remember { mutableStateOf("") }
+
+    val selectedSailor = sailors.firstOrNull { it.sailor_id == selectedSailorId }
+    val sailorBoats = selectedSailor?.boats.orEmpty()
+
+    LaunchedEffect(selectedSailorId) {
+        val selected = sailors.firstOrNull { it.sailor_id == selectedSailorId } ?: return@LaunchedEffect
+        sailor = selected.name
+        boat = ""
+        sailNumber = ""
+        handicap = ""
+        selected.boats.firstOrNull()?.let { defaultBoat ->
+            boat = defaultBoat.boat_class.orEmpty()
+            sailNumber = defaultBoat.sail_number.orEmpty()
+            handicap = defaultBoat.handicap?.toString().orEmpty()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2129,16 +2404,119 @@ private fun AddControlEntryDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Add a sailor/boat manually for this race when they have not signed in with the mobile app.",
+                    "Choose the sailor and their boat from the club list, just like on the web app.",
                     style = MaterialTheme.typography.bodySmall
                 )
-                OutlinedTextField(value = sailor, onValueChange = { sailor = it }, label = { Text("Sailor") }, singleLine = true)
-                OutlinedTextField(value = boat, onValueChange = { boat = it }, label = { Text("Boat") }, singleLine = true)
-                OutlinedTextField(value = sailNumber, onValueChange = { sailNumber = it }, label = { Text("Sail number") }, singleLine = true)
+
+                if (sailors.isEmpty()) {
+                    Text(
+                        "No sailor list is loaded yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(onClick = onReloadOptions) { Text("Reload list") }
+                }
+
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = if (sailor.isBlank()) "Select sailor" else sailor,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Sailor") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .clickable(role = Role.Button) { sailorExpanded = true }
+                    )
+                    DropdownMenu(
+                        expanded = sailorExpanded,
+                        onDismissRequest = { sailorExpanded = false },
+                        modifier = Modifier.heightIn(max = 280.dp)
+                    ) {
+                        sailors.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.name) },
+                                onClick = {
+                                    selectedSailorId = option.sailor_id
+                                    sailor = option.name
+                                    sailorExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = if (boat.isBlank()) "Select boat" else boat,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Boat") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .clickable(role = Role.Button) { boatExpanded = true }
+                    )
+                    DropdownMenu(
+                        expanded = boatExpanded,
+                        onDismissRequest = { boatExpanded = false },
+                        modifier = Modifier.heightIn(max = 280.dp)
+                    ) {
+                        if (sailorBoats.isNotEmpty()) {
+                            sailorBoats.forEach { option ->
+                                val label = listOfNotNull(
+                                    option.boat_class?.takeIf { it.isNotBlank() },
+                                    option.sail_number?.takeIf { it.isNotBlank() }?.let { "Sail $it" }
+                                ).joinToString(" · ").ifBlank { "Saved boat" }
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        boat = option.boat_class.orEmpty()
+                                        sailNumber = option.sail_number.orEmpty()
+                                        handicap = option.handicap?.toString().orEmpty()
+                                        boatExpanded = false
+                                    }
+                                )
+                            }
+                        } else {
+                            boatClasses.forEach { option ->
+                                val label = listOfNotNull(
+                                    option.name.takeIf { it.isNotBlank() },
+                                    option.handicap?.let { "PY $it" }
+                                ).joinToString(" · ")
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        boat = option.name
+                                        handicap = option.handicap?.toString().orEmpty()
+                                        boatExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = sailNumber,
+                    onValueChange = { sailNumber = it },
+                    label = { Text("Sail number") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
                 OutlinedTextField(
                     value = handicap,
                     onValueChange = { handicap = it },
                     label = { Text("Handicap (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true
                 )
@@ -2159,9 +2537,31 @@ private fun AddControlEntryDialog(
     )
 }
 
+private fun parseRaceDate(startedAt: String?): Date? {
+    if (startedAt.isNullOrBlank()) return null
+    val patterns = listOf(
+        "EEE, dd MMM yyyy HH:mm:ss z",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'"
+    )
+    for (pattern in patterns) {
+        val parsed = runCatching {
+            SimpleDateFormat(pattern, Locale.ENGLISH).apply { isLenient = false }.parse(startedAt)
+        }.getOrNull()
+        if (parsed != null) return parsed
+    }
+    return null
+}
+
 private fun raceDateLabel(startedAt: String?): String {
-    if (startedAt.isNullOrBlank()) return "No date"
-    return if (startedAt.length >= 10) startedAt.substring(0, 10) else startedAt
+    val parsed = parseRaceDate(startedAt) ?: return startedAt ?: "No date"
+    return SimpleDateFormat("EEEE d MMMM yyyy", Locale.getDefault()).format(parsed)
+}
+
+private fun formatRaceDateTime(startedAt: String?): String {
+    val parsed = parseRaceDate(startedAt) ?: return startedAt ?: "No date"
+    return SimpleDateFormat("EEEE d MMMM yyyy 'at' HH:mm", Locale.getDefault()).format(parsed)
 }
 
 private fun homePageFromName(name: String?): HomePage {

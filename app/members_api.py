@@ -176,8 +176,8 @@ def members_link_app_user(db, sailor_user_id, club_id, payload):
             if old_sailor_id and int(old_sailor_id) != int(target_sailor_id):
                 try:
                     delete_orphaned_sailor(conn, old_sailor_id, club_id)
-                except ValueError:
-                    pass  # old sailor has boats or other data – leave it, admin can tidy up
+                except Exception:
+                    pass  # cleanup is best-effort; the link itself has already succeeded
         return {"ok": True}, 200
     except ValueError as e:
         return {"ok": False, "error": str(e)}, 400

@@ -2,6 +2,15 @@
 
 This document outlines the steps to take Bartley-SC-App from current development state to a production launch for real club users (web + Android), then operate and support it safely.
 
+## Immediate repo deployment assets
+
+The repository now includes a practical first-live deployment pack:
+- [docker-compose.prod.yml](docker-compose.prod.yml) for a production-style container run
+- [.env.production.example](.env.production.example) for required secrets and settings
+- [DEPLOYMENT_QUICKSTART.md](DEPLOYMENT_QUICKSTART.md) for the fastest path to first deployment
+
+These do not replace the broader operational plan below, but they give a concrete starting point for staging and first production rollout.
+
 ---
 
 ## 1) Scope and launch goals

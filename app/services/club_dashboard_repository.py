@@ -231,6 +231,87 @@ def get_latest_race_results_rows(conn, club_id, limit=5):
     ).mappings().all()
 
 
+def get_series_results_rows(conn, club_id):
+    return conn.execute(
+        text('''
+            WITH race_results AS (
+                SELECT r.series AS series_id,
+                       sc.name AS series_name,
+                       r.key AS race_id,
+                       r.race_no,
+                       r.started_at,
+                       bc.sailor AS sailor_id,
+                       COALESCE(NULLIF(TRIM(re.sailor), ''), s.fullname, 'Unknown sailor') AS sailor_name,
+                       COALESCE(NULLIF(TRIM(re.boat), ''), hc.boat, 'Unknown boat') AS boat_name,
+                       re.sail_number,
+                       COALESCE(MAX(l.lap_number), COUNT(l.key), 0) AS lap_count,
+                       MAX(CASE WHEN l.is_finish THEN l.position END) AS finish_pos,
+                       MAX(CASE WHEN l.is_finish THEN l.elapsed_sec END) AS elapsed_sec,
+                       MAX(CASE WHEN l.is_finish THEN l.corrected_sec END) AS corrected_sec,
+                       CASE
+                           WHEN COUNT(l.key) > 0 AND MAX(CASE WHEN l.is_finish THEN 1 ELSE 0 END) = 0 THEN TRUE
+                           ELSE FALSE
+                       END AS did_not_finish
+                FROM "RACINGAPP"."RACE" r
+                JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
+                JOIN "RACINGAPP"."RACE_ENTRY" re ON re.race_id = r.key
+                LEFT JOIN "RACINGAPP"."BOATCONTROL" bc ON bc.key = re.boatkey
+                LEFT JOIN "RACINGAPP"."SAILORCONTROL" s ON s.key = bc.sailor
+                LEFT JOIN "RACINGAPP"."HANDICAPCONTROL" hc ON hc.key = bc.boat
+                LEFT JOIN "RACINGAPP"."LAP" l ON l.race_entry_id = re.key
+                WHERE r.club = :club_id
+                  AND r.status = 'finished'
+                GROUP BY r.series, sc.name, r.key, r.race_no, r.started_at,
+                         bc.sailor, s.fullname, re.key, re.sailor, re.boat, re.sail_number, hc.boat
+            ),
+            series_meta AS (
+                SELECT r.series AS series_id,
+                       MAX(r.started_at) AS latest_started_at,
+                       COUNT(DISTINCT r.key) AS race_count
+                FROM "RACINGAPP"."RACE" r
+                WHERE r.club = :club_id
+                  AND r.status = 'finished'
+                GROUP BY r.series
+            ),
+            series_discard_meta AS (
+                SELECT sm.series_id,
+                       COALESCE(MAX(CASE WHEN ssd.after_races <= sm.race_count THEN ssd.discard_count END), 0) AS discard_count
+                FROM series_meta sm
+                LEFT JOIN "RACINGAPP"."SERIES_SCORING_DISCARD" ssd ON ssd.series = sm.series_id
+                GROUP BY sm.series_id
+            )
+            SELECT rr.series_id,
+                   rr.series_name,
+                   rr.race_id,
+                   rr.race_no,
+                   rr.started_at,
+                   rr.sailor_id,
+                   rr.sailor_name,
+                   rr.boat_name,
+                   rr.sail_number,
+                   rr.lap_count,
+                   rr.finish_pos,
+                   rr.elapsed_sec,
+                   rr.corrected_sec,
+                   rr.did_not_finish,
+                   sm.latest_started_at,
+                   sm.race_count,
+                   COALESCE(sdm.discard_count, 0) AS discard_count
+            FROM race_results rr
+            JOIN series_meta sm ON sm.series_id = rr.series_id
+            LEFT JOIN series_discard_meta sdm ON sdm.series_id = rr.series_id
+            ORDER BY sm.latest_started_at DESC NULLS LAST,
+                     rr.series_name ASC,
+                     rr.started_at ASC NULLS LAST,
+                     rr.race_no ASC,
+                     CASE WHEN rr.finish_pos IS NULL THEN 1 ELSE 0 END,
+                     rr.finish_pos ASC NULLS LAST,
+                     rr.sailor_name ASC
+        '''),
+        {"club_id": club_id},
+    ).mappings().all()
+
+
 def get_club_summary_stats(conn, club_id):
     return conn.execute(
         text('''

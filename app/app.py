@@ -3,9 +3,12 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 from datetime import datetime, timedelta, time, date
+from collections import defaultdict
+from urllib.parse import urlsplit
 import json
 import os
 import logging
+import time as time_module
 from uuid import uuid4
 from dotenv import load_dotenv
 
@@ -31,6 +34,7 @@ from mobile_api import (
     mobile_boats,
     mobile_clubs,
     mobile_control_entries,
+    mobile_control_options,
     mobile_control_summary,
     mobile_control_upcoming_races,
     mobile_create_boat,
@@ -43,6 +47,7 @@ from mobile_api import (
     mobile_race_results,
     mobile_register,
     mobile_series,
+    mobile_series_results,
     mobile_series_standings,
     mobile_upcoming_races,
     mobile_update_me,
@@ -142,21 +147,135 @@ from club_dashboard_api import (
     dashboard_race_calendar,
     dashboard_results_review_queue,
     dashboard_sailors_boats,
+    dashboard_series_results,
 )
 from services.error_responses import error_payload_for_exception, is_db_disconnect_error
+from services.mobile_repository import get_sailor_user_context
 
 
+
+def env_flag(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+DEFAULT_DATABASE_URL = 'postgresql://dwh:DBTTEST@localhost:5432/dwh'
+DEFAULT_SECRET_KEY = 'change-me-in-production'
+AUTH_RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get('AUTH_RATE_LIMIT_WINDOW_SECONDS', '900'))
+AUTH_RATE_LIMIT_MAX_ATTEMPTS = int(os.environ.get('AUTH_RATE_LIMIT_MAX_ATTEMPTS', '5'))
+_failed_auth_attempts = defaultdict(list)
 
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
     'DATABASE_URL',
-    'postgresql://dwh:DBTTEST@localhost:5432/dwh'
+    DEFAULT_DATABASE_URL
 )
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SECURE'] = env_flag('SESSION_COOKIE_SECURE', False)
+app.config['SESSION_COOKIE_SAMESITE'] = os.environ.get('SESSION_COOKIE_SAMESITE', 'Lax')
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=int(os.environ.get('SESSION_LIFETIME_HOURS', '12')))
 app.app_context().push()
 db = SQLAlchemy(app)
-app.secret_key = os.environ.get('SECRET_KEY', 'change-me-in-production')
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+app.secret_key = os.environ.get('SECRET_KEY', DEFAULT_SECRET_KEY)
+
+
+def validate_security_config():
+    strict_mode = env_flag('REQUIRE_STRICT_SECRETS', False) or app.config['SESSION_COOKIE_SECURE']
+
+    if strict_mode and app.secret_key == DEFAULT_SECRET_KEY:
+        raise RuntimeError('SECRET_KEY must be set to a strong non-default value before production use')
+    if strict_mode and app.config['SQLALCHEMY_DATABASE_URI'] == DEFAULT_DATABASE_URL:
+        raise RuntimeError('DATABASE_URL must be set explicitly before production use')
+
+    if app.secret_key == DEFAULT_SECRET_KEY:
+        app.logger.warning('Using development SECRET_KEY fallback; do not use this in production')
+    if app.config['SQLALCHEMY_DATABASE_URI'] == DEFAULT_DATABASE_URL:
+        app.logger.warning('Using development DATABASE_URL fallback; do not use this in production')
+
+
+def _client_ip_for_security():
+    forwarded = (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
+    return forwarded or request.remote_addr or 'unknown'
+
+
+def _auth_limit_key(scope, username):
+    normalized = (username or '').strip().lower() or '<empty>'
+    return f'{scope}|{_client_ip_for_security()}|{normalized}'
+
+
+def _prune_auth_attempts(key):
+    cutoff = time_module.time() - AUTH_RATE_LIMIT_WINDOW_SECONDS
+    recent = [ts for ts in _failed_auth_attempts.get(key, []) if ts >= cutoff]
+    if recent:
+        _failed_auth_attempts[key] = recent
+    elif key in _failed_auth_attempts:
+        del _failed_auth_attempts[key]
+    return recent
+
+
+def check_auth_rate_limit(scope, username):
+    key = _auth_limit_key(scope, username)
+    attempts = _prune_auth_attempts(key)
+    if len(attempts) < AUTH_RATE_LIMIT_MAX_ATTEMPTS:
+        return None
+
+    retry_after = max(1, int(AUTH_RATE_LIMIT_WINDOW_SECONDS - (time_module.time() - attempts[0])))
+    response = jsonify({
+        'ok': False,
+        'error': 'Too many login attempts. Try again later.'
+    })
+    response.status_code = 429
+    response.headers['Retry-After'] = str(retry_after)
+    return response
+
+
+def record_auth_failure(scope, username):
+    key = _auth_limit_key(scope, username)
+    attempts = _prune_auth_attempts(key)
+    attempts.append(time_module.time())
+    _failed_auth_attempts[key] = attempts
+
+
+def clear_auth_failures(scope, username):
+    key = _auth_limit_key(scope, username)
+    _failed_auth_attempts.pop(key, None)
+
+
+def _is_same_origin_url(raw_url):
+    try:
+        source = urlsplit(raw_url)
+        target = urlsplit(request.host_url)
+        return source.scheme == target.scheme and source.netloc == target.netloc
+    except Exception:
+        return False
+
+
+@app.before_request
+def enforce_same_origin_for_api_writes():
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    if not request.path.startswith("/api/"):
+        return None
+    if request.path.startswith("/api/mobile/"):
+        return None
+
+    source = request.headers.get("Origin") or request.headers.get("Referer")
+    if not source:
+        return None
+    if _is_same_origin_url(source):
+        return None
+
+    return jsonify({
+        "ok": False,
+        "error": "CSRF protection: cross-site request rejected"
+    }), 403
+
+
+validate_security_config()
 db.Model.metadata.reflect(db.engine, schema='RACINGAPP')
 
 
@@ -190,6 +309,42 @@ def normalize_api_db_disconnect_response(response):
     normalized = jsonify(payload)
     normalized.status_code = status
     return normalized
+
+
+@app.before_request
+def sync_mobile_session_identity():
+    if not request.path.startswith("/api/mobile/"):
+        return None
+
+    sailor_user_id = session.get("sailor_user_id")
+    if not sailor_user_id:
+        return None
+
+    try:
+        with db.engine.connect() as conn:
+            context = get_sailor_user_context(conn, sailor_user_id)
+
+        if not context:
+            return None
+
+        current_sailor_id = context.get("sailor_id")
+        if current_sailor_id not in (None, "", "null"):
+            session["sailor_id"] = str(current_sailor_id)
+
+        current_club_id = context.get("club_id")
+        if current_club_id in (None, "", "null"):
+            session.pop("sailor_club_id", None)
+        else:
+            session["sailor_club_id"] = str(current_club_id)
+
+        username = context.get("username")
+        if username:
+            session["sailor_username"] = username
+    except Exception:
+        logging.exception("Failed to sync mobile session for sailor_user_id=%s", sailor_user_id)
+
+    return None
+
 
 class Boats(db.Model):
     __table__ = db.metadata.tables["RACINGAPP.HANDICAPCONTROL"]
@@ -292,7 +447,7 @@ def require_mobile_race_control_access(race_id):
             if not club_id:
                 return jsonify({"ok": False, "error": "No club assigned for sailor"}), 403
 
-            allowed = sailor_can_access_race_control(conn, sailor_user_id, sailor_id, club_id, race_id)
+            allowed = bool(race_exists_for_club(conn, race_id, club_id))
     except Exception as exc:
         payload, status = error_payload_for_exception(exc)
         return jsonify(payload), status
@@ -638,8 +793,16 @@ def login_page():
 
 @app.post("/api/login")
 def api_login():
-    payload, status = admin_login(db, request.get_json(silent=True) or {}, grant_club_role)
+    request_payload = request.get_json(silent=True) or {}
+    username = request_payload.get("username")
+
+    limited = check_auth_rate_limit("web_admin_login", username)
+    if limited is not None:
+        return limited
+
+    payload, status = admin_login(db, request_payload, grant_club_role)
     if status == 200 and payload.get("ok"):
+        clear_auth_failures("web_admin_login", username)
         session["user_id"] = str(payload["user_id"])
         session["username"] = payload["username"]
         session["club_id"] = payload["club_id"]
@@ -647,6 +810,8 @@ def api_login():
         race_data = session.get("race", {})
         race_data["club_id"] = payload["club_id"]
         session["race"] = race_data
+    else:
+        record_auth_failure("web_admin_login", username)
     response_payload = {k: v for k, v in payload.items() if k != "user_id"}
     return jsonify(response_payload), status
 
@@ -664,12 +829,23 @@ def sailor_portal_page():
 
 @app.post("/api/mobile/login")
 def api_mobile_login():
+    request_payload = request.get_json(silent=True) or {}
+    username = request_payload.get("username")
+
+    limited = check_auth_rate_limit("mobile_login", username)
+    if limited is not None:
+        return limited
+
     payload, status = mobile_login(
         db,
-        request.get_json(silent=True) or {},
+        request_payload,
         grant_sailor_role,
         set_mobile_session,
     )
+    if status == 200 and payload.get("ok"):
+        clear_auth_failures("mobile_login", username)
+    else:
+        record_auth_failure("mobile_login", username)
     return jsonify(payload), status
 
 
@@ -789,6 +965,15 @@ def api_mobile_series_standings():
     return jsonify(payload), status
 
 
+@app.get("/api/mobile/series/results")
+def api_mobile_series_results():
+    sailor_id = session.get("sailor_id")
+    if not sailor_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    payload, status = mobile_series_results(db, sailor_id, session)
+    return jsonify(payload), status
+
+
 @app.post("/api/mobile/races/<int:race_id>/join")
 def api_mobile_join_race(race_id):
     club_id = session.get("sailor_club_id")
@@ -826,6 +1011,15 @@ def api_mobile_control_upcoming_races():
 @app.get("/api/mobile/races/control/access")
 def api_mobile_control_access():
     payload, status = build_control_access_response(db, session, sailor_has_active_role)
+    return jsonify(payload), status
+
+
+@app.get("/api/mobile/races/control/options")
+def api_mobile_control_options():
+    sailor_id = session.get("sailor_id")
+    if not sailor_id:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    payload, status = mobile_control_options(db, sailor_id, session)
     return jsonify(payload), status
 
 
@@ -966,6 +1160,15 @@ def api_dashboard_landing_overview():
     if guard is not None:
         return guard
     payload, status = dashboard_landing_overview(db, session.get("club_id"))
+    return jsonify(payload), status
+
+
+@app.get("/api/dashboard/series-results")
+def api_dashboard_series_results():
+    guard = require_club_admin()
+    if guard is not None:
+        return guard
+    payload, status = dashboard_series_results(db, session.get("club_id"))
     return jsonify(payload), status
 
 

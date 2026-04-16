@@ -140,7 +140,8 @@ data class MyRaceResult(
     val sail_number: String,
     val position: Int?,
     val elapsed_time: String?,
-    val corrected_time: String?
+    val corrected_time: String?,
+    val dnf: Boolean = false
 )
 
 data class LeaderboardRow(
@@ -148,7 +149,9 @@ data class LeaderboardRow(
     val boat: String,
     val sail_number: String,
     val position: Int?,
-    val corrected_time: String?
+    val elapsed_time: String? = null,
+    val corrected_time: String? = null,
+    val dnf: Boolean = false
 )
 
 data class RaceResultsResponse(
@@ -180,6 +183,25 @@ data class RaceControlAccessResponse(
     val can_race_control: Boolean = false,
     val is_mobile_admin: Boolean = false,
     val assigned_race_ids: List<Long> = emptyList()
+)
+
+data class ControlSailorBoat(
+    val boatkey: Long? = null,
+    val sail_number: String? = null,
+    val boat_class: String? = null,
+    val handicap: Int? = null
+)
+
+data class ControlSailorOption(
+    val sailor_id: Long,
+    val name: String,
+    val boats: List<ControlSailorBoat> = emptyList()
+)
+
+data class RaceControlOptionsResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val sailors: List<ControlSailorOption> = emptyList()
 )
 
 data class RaceControlEntry(
@@ -303,6 +325,64 @@ data class SeriesStandingsResponse(
     val ok: Boolean,
     val error: String? = null,
     val standings: List<SeriesStandingRow> = emptyList()
+)
+
+data class MobileSeriesRaceHeader(
+    val race_id: Long,
+    val race_no: Int,
+    val started_at: String? = null
+)
+
+data class MobileSeriesResultCell(
+    val text: String? = null,
+    val status: String? = null,
+    val discarded: Boolean = false
+)
+
+data class MobileSeriesStanding(
+    val sailor_name: String,
+    val boat_name: String? = null,
+    val points: Double? = null,
+    val points_text: String? = null,
+    val races_completed: Int = 0,
+    val rank: Int = 0,
+    val race_results: List<MobileSeriesResultCell> = emptyList()
+)
+
+data class MobileSeriesRaceDetailResult(
+    val rank_text: String? = null,
+    val sailor_name: String,
+    val boat_name: String? = null,
+    val sail_number: String? = null,
+    val elapsed_time: String? = null,
+    val corrected_time: String? = null,
+    val points: Double? = null
+)
+
+data class MobileSeriesRaceSection(
+    val race_id: Long,
+    val race_no: Int,
+    val started_at: String? = null,
+    val entry_count: Int = 0,
+    val results: List<MobileSeriesRaceDetailResult> = emptyList()
+)
+
+data class MobileSeriesSummary(
+    val series_id: Long,
+    val series_name: String,
+    val latest_started_at: String? = null,
+    val race_count: Int = 0,
+    val discard_count: Int = 0,
+    val races: List<MobileSeriesRaceHeader> = emptyList(),
+    val results: List<MobileSeriesStanding> = emptyList(),
+    val race_sections: List<MobileSeriesRaceSection> = emptyList()
+)
+
+data class MobileSeriesResultsResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val series: List<MobileSeriesSummary> = emptyList(),
+    val latest_series_id: Long? = null
 )
 
 data class SailorDuty(

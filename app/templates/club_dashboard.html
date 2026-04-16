@@ -7,17 +7,17 @@
   <link rel="stylesheet" href="{{ url_for('static',filename='styles/styles.css') }}">
   <style>
     .dashboard-wrap { width: 1100px; margin: 20px auto 60px; text-align: left; }
-    .dashboard-nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
-    .dash-nav-btn { border: 1px solid #d4d8ff; background: #fff; color: #1331C5; padding: 10px 12px; border-radius: 8px; font-weight: 600; cursor: pointer; }
-    .dash-nav-btn.active { background: #1331C5; color: #fff; }
-    .dash-card { background: #fff; border: 1px solid #dfe3fb; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.06); margin-top: 16px; }
-    .dash-card h3 { margin: 0; padding: 14px 16px; color: #1331C5; border-bottom: 1px solid #eceffd; }
+    .dashboard-nav { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+    .dash-nav-btn { border: 1px solid #E3E8EE; background: #fff; color: #142E4F; padding: 10px 12px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    .dash-nav-btn.active { background: #2C9C9C; color: #fff; }
+    .dash-card { background: #fff; border: 1px solid #E3E8EE; border-radius: 10px; box-shadow: 0 2px 8px rgba(20,46,79,.08); margin-top: 16px; }
+    .dash-card h3 { margin: 0; padding: 14px 16px; color: #142E4F; border-bottom: 1px solid #eceffd; }
     .dash-body { padding: 14px 16px; }
     .dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     .dash-table th { text-align: left; background: #f2f4ff; color: #223; padding: 8px; border-bottom: 1px solid #dfe3fb; }
     .dash-table td { padding: 8px; border-bottom: 1px solid #eef1ff; }
-    .dash-chip { display:inline-block; padding: 2px 8px; border-radius: 12px; background:#eef2ff; color:#233b9b; font-size:12px; }
+    .dash-chip { display:inline-block; padding: 2px 8px; border-radius: 12px; background:#EAF7F7; color:#142E4F; font-size:12px; }
     .dash-controls { display:flex; gap:10px; align-items:center; margin-bottom:10px; flex-wrap: wrap; }
     .dash-controls input, .dash-controls select { height:34px; border:1px solid #cfd6ff; border-radius:6px; padding:0 8px; }
     .hidden { display: none; }
@@ -27,6 +27,11 @@
     .dash-card-header h3 { margin:0; color:#1331C5; }
     .dash-card > h3 { display:none; }
     .dash-header-actions { display:flex; gap:8px; }
+    .series-scroll { overflow-x:auto; border:1px solid #eef1ff; border-radius:8px; }
+    .series-result-finish { color:#1331C5; font-weight:600; }
+    .series-result-dnf { color:#b45309; }
+    .series-result-dnc { color:#6b7280; }
+    .series-race-stack { display:grid; gap:14px; margin-top:16px; }
   </style>
 </head>
 <body>
@@ -45,6 +50,7 @@
       <button class="dash-nav-btn active" data-view="sailors">Sailors & Boats</button>
       <button class="dash-nav-btn" data-view="calendar">Race Calendar</button>
       <button class="dash-nav-btn" data-view="imports">Race Queue</button>
+      <button class="dash-nav-btn" data-view="series">Series Results</button>
       <button class="dash-nav-btn" data-view="handicap">Handicap Recommendations</button>
       <button class="dash-nav-btn" data-view="exports">Exports</button>
     </div>
@@ -177,6 +183,35 @@
             </div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section id="view-series" class="dash-card hidden">
+      <div class="dash-card-header">
+        <h3>Series Results</h3>
+        <div class="dash-header-actions">
+          <div id="seriesResultsMeta" class="muted"></div>
+        </div>
+      </div>
+      <div class="dash-body">
+        <div class="dash-controls">
+          <label>Series
+            <select id="seriesResultsSelect">
+              <option value="">Loading series...</option>
+            </select>
+          </label>
+        </div>
+        <div id="seriesResultsStatus" class="muted" style="margin-bottom:10px;"></div>
+
+        <h4 style="margin:0 0 10px; color:#1331C5;">Overall</h4>
+        <div class="series-scroll">
+          <table class="dash-table">
+            <thead id="seriesResultsHead"></thead>
+            <tbody id="seriesResultsRows"></tbody>
+          </table>
+        </div>
+
+        <div id="seriesRaceDetailSections" class="series-race-stack"></div>
       </div>
     </section>
 

@@ -9,9 +9,29 @@ import androidx.activity.compose.setContent
 import androidx.core.content.ContextCompat
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.Color
 import com.quicksail.sailor.api.Network
 import com.quicksail.sailor.notifications.NotificationCenter
 import com.quicksail.sailor.ui.SailorApp
+
+private val LaylineColorScheme = lightColorScheme(
+    primary = Color(0xFF142E4F),
+    onPrimary = Color(0xFFFFFFFF),
+    secondary = Color(0xFF2C9C9C),
+    onSecondary = Color(0xFFFFFFFF),
+    tertiary = Color(0xFF5FB8B8),
+    background = Color(0xFFF7F9FB),
+    onBackground = Color(0xFF142E4F),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF142E4F),
+    surfaceVariant = Color(0xFFE3E8EE),
+    onSurfaceVariant = Color(0xFF6B7C8F),
+    error = Color(0xFFD96B6B),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFDECEC),
+    onErrorContainer = Color(0xFF7A2323)
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -20,8 +40,10 @@ class MainActivity : ComponentActivity() {
         NotificationCenter.init(applicationContext)
         requestNotificationPermissionIfNeeded()
         setContent {
-            Surface(color = MaterialTheme.colorScheme.background) {
-                SailorApp()
+            MaterialTheme(colorScheme = LaylineColorScheme) {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    SailorApp()
+                }
             }
         }
     }

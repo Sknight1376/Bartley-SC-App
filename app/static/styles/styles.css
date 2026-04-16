@@ -1,17 +1,30 @@
 *, *::before, *::after { box-sizing: inherit;}
 
+:root {
+    --brand-primary: #142E4F;
+    --brand-accent: #2C9C9C;
+    --brand-primary-dark: #0E223A;
+    --brand-accent-soft: #5FB8B8;
+    --brand-bg: #F7F9FB;
+    --brand-surface: #FFFFFF;
+    --brand-border: #E3E8EE;
+    --brand-muted: #6B7C8F;
+    --brand-success: #3FBF9F;
+    --brand-warning: #F2B950;
+    --brand-error: #D96B6B;
+}
 
 body {
-    background: linear-gradient(116.82deg, #D7D9FD 0%, #C0C3FD 50%, #A9ADFC 100%);
-    background-size: cover; /* Ensures the image covers the entire background */
-    background-repeat: no-repeat; /* Prevents the image from repeating */
-    background-attachment: fixed; /* Keeps the background fixed during scrolling */
+    background: linear-gradient(135deg, var(--brand-bg) 0%, #EEF3F7 55%, #E3E8EE 100%);
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
     width:100%;
     margin-left:auto;
     margin-right:auto;
     text-align: center;
     font-family: 'Helvetica Neue', Arial, sans-serif;
-    color: #333;
+    color: var(--brand-primary);
 
 }
 
@@ -32,29 +45,34 @@ body {
 }
 
 .lettering {
-  /* remove absolute positioning */
-  position: static;         /* or just delete position/left/top entirely */
-  width: auto;              /* avoid fixed Figma width */
+  position: static;
+  width: auto;
   height: auto;
-
-  /* spacing + alignment */
-  display: block;
-  text-align: left;         /* because body is text-align:center */
-  margin: 15px auto 10px;   /* top, horizontal center, bottom */
-  max-width: 990px;         /* match your form width if needed */
-  padding: 0 15px;          /* some breathing room on small screens */
-
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  margin: 15px auto 10px;
+  max-width: 990px;
+  padding: 0 15px;
   font-family: 'Inter', sans-serif;
   font-style: normal;
   font-weight: 800;
   font-size: 40px;
   line-height: 48px;
-  color: #1331C5;
+  color: var(--brand-primary);
 }
 
+.lettering::before {
+  content: "";
+  width: 46px;
+  height: 46px;
+  background: url('/static/images/layline-logo.svg') center/contain no-repeat;
+  flex: 0 0 auto;
+}
 
 .banner {
-    background-color: #1331C5;
+    background-color: var(--brand-primary);
     height: 64.00px;
     padding: 0px;
     max-width: 100%;
@@ -83,6 +101,19 @@ body {
     font-size: 28px;
     font-weight: 800;
     letter-spacing: .4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.app-brand-logo {
+    width: 34px;
+    height: 34px;
+    display: block;
+}
+
+.app-brand-text {
+    display: inline-block;
 }
 
 .app-menu-shell {
@@ -90,8 +121,8 @@ body {
 }
 
 .app-menu-trigger {
-    border: 1px solid rgba(255,255,255,0.35);
-    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(95,184,184,0.65);
+    background: rgba(44,156,156,0.18);
     color: #fff;
     border-radius: 999px;
     font-weight: 600;
@@ -126,7 +157,7 @@ body {
 }
 
 .app-menu-link {
-    color: #1331C5;
+    color: var(--brand-primary);
     text-decoration: none;
     padding: 9px 10px;
     border-radius: 8px;
@@ -134,12 +165,13 @@ body {
 }
 
 .app-menu-link.active {
-    background: #eef2ff;
+    background: #EAF7F7;
+    color: var(--brand-primary-dark);
 }
 
 .app-menu-link:hover,
 .app-menu-link:focus-visible {
-    background: #eef2ff;
+    background: #EAF7F7;
     outline: none;
 }
 
@@ -154,17 +186,17 @@ body {
 }
 
 .form-border{
-     background-color: #ffffff;
-     border: 3px solid #1331C5;
-     border-bottom-left-radius: 4px;
-     border-bottom-right-radius: 4px;
-     border-top-left-radius: 4px;
-     border-top-right-radius: 4px;
+     background-color: var(--brand-surface);
+     border: 2px solid var(--brand-border);
+     border-bottom-left-radius: 8px;
+     border-bottom-right-radius: 8px;
+     border-top-left-radius: 8px;
+     border-top-right-radius: 8px;
     width: 100%;
     max-width: 990px;
     padding: 0 16px 20px;
      position: relative;
-     box-shadow: 0px 4px 4px #000000;
+     box-shadow: 0 8px 24px rgba(20, 46, 79, 0.10);
      box-sizing: border-box;
      margin: auto;
      align-items: center;
@@ -496,7 +528,7 @@ label {display: block;
 
 
 .blue-button {
-    background-color: #1331C5; /* Blue background */
+    background-color: var(--brand-accent);
     border: none; /* Remove borders */
     color: white; /* White text */
     padding: 15px 32px; /* Some padding */
@@ -513,11 +545,11 @@ label {display: block;
 }
 
 .blue-button:hover {
-    background-color: #071A77; /* Darker green on hover */
+    background-color: var(--brand-primary-dark);
 }
 
 .green-button {
-    background-color: #4CAF50; /* Green background */
+    background-color: var(--brand-success);
     border: none; /* Remove borders */
     color: white; /* White text */
     padding: 15px 32px; /* Some padding */
@@ -536,7 +568,7 @@ label {display: block;
 
 
 .red-button {
-    background-color: #f23333; /* Green background */
+    background-color: var(--brand-error);
     border: none; /* Remove borders */
     color: white; /* White text */
     padding: 15px 32px; /* Some padding */
@@ -554,7 +586,7 @@ label {display: block;
 }
 
 .orange-button {
-    background-color: #fcb603; /* Green background */
+    background-color: var(--brand-warning);
     border: none; /* Remove borders */
     color: white; /* White text */
     padding: 15px 32px; /* Some padding */
@@ -613,7 +645,7 @@ label {display: block;
 }
 
 .next-race-link {
-    color: #1331C5;
+    color: var(--brand-accent);
     text-decoration: none;
     font-weight: 600;
 }

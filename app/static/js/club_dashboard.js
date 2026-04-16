@@ -1,8 +1,9 @@
 ﻿(function () {
-  const views = ["sailors", "calendar", "imports", "handicap", "exports"];
+  const views = ["sailors", "calendar", "imports", "series", "handicap", "exports"];
   const manualEntries = [];
   let showingApprovedQueue = false;
   let sailorDirectory = [];
+  let seriesResultsDirectory = [];
 
   function esc(v) {
     return String(v ?? "")
@@ -369,6 +370,103 @@
     });
   }
 
+  function renderSeriesResults() {
+    const select = document.getElementById("seriesResultsSelect");
+    const head = document.getElementById("seriesResultsHead");
+    const rows = document.getElementById("seriesResultsRows");
+    const details = document.getElementById("seriesRaceDetailSections");
+    const meta = document.getElementById("seriesResultsMeta");
+    const status = document.getElementById("seriesResultsStatus");
+    if (!select || !head || !rows || !details || !meta || !status) return;
+
+    if (!seriesResultsDirectory.length) {
+      select.innerHTML = '<option value="">No completed series yet</option>';
+      head.innerHTML = '<tr><th>Series standings</th></tr>';
+      rows.innerHTML = '<tr><td class="muted">No completed series results found.</td></tr>';
+      details.innerHTML = '';
+      meta.textContent = '';
+      status.textContent = '';
+      return;
+    }
+
+    if (!select.options.length || select.options[0].value === '') {
+      select.innerHTML = seriesResultsDirectory.map((series) =>
+        `<option value="${esc(series.series_id)}">${esc(series.series_name)}</option>`
+      ).join('');
+    }
+
+    const selectedId = select.value || String(seriesResultsDirectory[0].series_id);
+    const selectedSeries = seriesResultsDirectory.find((series) => String(series.series_id) === String(selectedId)) || seriesResultsDirectory[0];
+    const races = selectedSeries.races || [];
+    select.value = String(selectedSeries.series_id);
+
+    meta.textContent = `Latest race ${fmtDateTime(selectedSeries.latest_started_at)} · ${selectedSeries.race_count} race(s) · ${selectedSeries.discard_count || 0} discard(s)`;
+    status.textContent = `Showing ${selectedSeries.results.length} sailor result(s) across ${races.length} race(s) for ${selectedSeries.series_name}.`;
+
+    head.innerHTML = `
+      <tr>
+        <th>Rank</th>
+        <th>Sailor</th>
+        ${races.map((race) => `<th title="${esc(fmtDateTime(race.started_at))}">R${esc(race.race_no)}</th>`).join('')}
+        <th>Total</th>
+        <th>Sailed</th>
+      </tr>
+    `;
+
+    rows.innerHTML = (selectedSeries.results || []).map((r) => `
+      <tr>
+        <td><span class="dash-chip">${esc(r.rank)}</span></td>
+        <td>${esc(r.sailor_name)}</td>
+        ${(r.race_results || []).map((cell) => `<td class="series-result-${esc(cell.status || 'finish')}">${esc(cell.text || '')}</td>`).join('')}
+        <td><strong>${esc(r.points_text || r.points)}</strong></td>
+        <td>${esc(r.races_completed)}</td>
+      </tr>
+    `).join('') || `<tr><td colspan="${races.length + 4}" class="muted">No series standings available.</td></tr>`;
+
+    details.innerHTML = (selectedSeries.race_sections || []).map((race) => `
+      <div class="dash-card" style="margin-top:0;">
+        <div class="dash-card-header">
+          <h3>Race ${esc(race.race_no)} - ${esc(fmtDateTime(race.started_at))}</h3>
+          <div class="muted">Entries ${esc(race.entry_count || 0)}</div>
+        </div>
+        <div class="dash-body">
+          <table class="dash-table">
+            <thead>
+              <tr>
+                <th>Pos</th>
+                <th>Sailor</th>
+                <th>Boat</th>
+                <th>Sail #</th>
+                <th>Elapsed</th>
+                <th>Corrected</th>
+                <th>Points</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(race.results || []).map((result) => `
+                <tr>
+                  <td>${esc(result.rank_text || '')}</td>
+                  <td>${esc(result.sailor_name)}</td>
+                  <td>${esc(result.boat_name || '')}</td>
+                  <td>${esc(result.sail_number || '')}</td>
+                  <td class="mono">${esc(result.elapsed_time || '')}</td>
+                  <td class="mono">${esc(result.corrected_time || '')}</td>
+                  <td>${esc(result.points || '')}</td>
+                </tr>
+              `).join('') || '<tr><td colspan="7" class="muted">No race results available.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function loadSeriesResults() {
+    const data = await getJson("/api/dashboard/series-results");
+    seriesResultsDirectory = data.series || [];
+    renderSeriesResults();
+  }
+
   async function loadHandicapRecommendations() {
     const data = await getJson("/api/dashboard/handicap-recommendations");
     const rows = document.getElementById("handicapRows");
@@ -596,6 +694,7 @@
 
   // ...existing event wiring...
   document.getElementById("reloadCalendar")?.addEventListener("click", loadCalendar);
+  document.getElementById("seriesResultsSelect")?.addEventListener("change", renderSeriesResults);
   document.getElementById("exportResultsBtn")?.addEventListener("click", exportResults);
   document.getElementById("previewImportBtn")?.addEventListener("click", previewImport);
   document.getElementById("applyImportBtn")?.addEventListener("click", applyImport);
@@ -618,6 +717,7 @@
       },
       { run: loadCalendar, fallback: () => setTableFallback("calendarRows", 5, "Unable to load race calendar right now.") },
       { run: loadRaceQueue, fallback: () => setTableFallback("raceQueueRows", 8, "Unable to load race queue right now.") },
+      { run: loadSeriesResults, fallback: () => setTableFallback("seriesResultsRows", 8, "Unable to load series results right now.") },
       { run: loadHandicapRecommendations, fallback: () => setTableFallback("handicapRows", 6, "Unable to load handicap recommendations right now.") },
       { run: loadSeriesOptions },
     ];

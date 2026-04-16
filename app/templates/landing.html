@@ -18,20 +18,24 @@
   <h4 style="color: #979797">Choose what you want to do next</h4>
 </div>
 
-<section style="width:990px; margin:18px auto 0; display:grid; grid-template-columns: 1.3fr 1fr; gap:18px;">
-  <div style="background:#fff; border:1px solid #dfe3fb; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.06); text-align:left;">
-    <h3 style="margin:0 0 12px; color:#1331C5;">Latest Race Results</h3>
+<section style="width:990px; margin:18px auto 0; display:grid; grid-template-columns: 1.15fr 0.9fr 1fr; gap:18px; align-items:start;">
+  <div style="background:#fff; border:1px solid #E3E8EE; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(20,46,79,.08); text-align:left;">
+    <h3 style="margin:0 0 12px; color:#142E4F;">Latest Race Results</h3>
     <div id="latestResultsPanel" style="color:#6b7280;">Loading latest results...</div>
   </div>
-  <div style="background:#fff; border:1px solid #dfe3fb; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.06); text-align:left;">
-    <h3 style="margin:0 0 12px; color:#1331C5;">Club Summary</h3>
+  <div style="background:#fff; border:1px solid #E3E8EE; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(20,46,79,.08); text-align:left;">
+    <h3 style="margin:0 0 12px; color:#142E4F;">Club Summary</h3>
     <div id="clubSummaryPanel" style="color:#6b7280;">Loading summary...</div>
+  </div>
+  <div style="background:#fff; border:1px solid #E3E8EE; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(20,46,79,.08); text-align:left;">
+    <h3 style="margin:0 0 12px; color:#142E4F;">Latest Series</h3>
+    <div id="latestSeriesPanel" style="color:#6b7280;">Loading latest series...</div>
   </div>
 </section>
 
 <section class="next-race-shell" aria-label="Next race">
   <div class="next-race-card">
-    <h3 style="margin:0 0 10px; color:#1331C5;">Next Race</h3>
+    <h3 style="margin:0 0 10px; color:#142E4F;">Next Race</h3>
     <div id="nextRacePanel" style="color:#6b7280;">Loading next race...</div>
     <div class="next-race-actions">
       <button type="button" id="startNextRaceBtn" class="blue-button" style="position:static;" disabled>Start This Race</button>
@@ -149,6 +153,7 @@ async function startNextRaceFlow() {
 async function loadLandingOverview() {
   const resultsPanel = document.getElementById('latestResultsPanel');
   const summaryPanel = document.getElementById('clubSummaryPanel');
+  const latestSeriesPanel = document.getElementById('latestSeriesPanel');
   try {
     const res = await fetch('/api/dashboard/landing-overview', { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
@@ -187,9 +192,9 @@ async function loadLandingOverview() {
               <div>
                 <div style="font-weight:600; color:#1f2937;">${esc(race.series_name)} — Race #${esc(race.race_no)}</div>
                 <div style="font-size:13px; color:#6b7280;">${formatDateTime(race.started_at)}</div>
-                <div style="font-size:13px; color:#1331C5; margin-top:4px;">Entries ${esc(entryCount)} · Finishers ${esc(finisherCount)}</div>
+                <div style="font-size:13px; color:#2C9C9C; margin-top:4px;">Entries ${esc(entryCount)} · Finishers ${esc(finisherCount)}</div>
               </div>
-              <a href="/race_summary?race_id=${encodeURIComponent(race.race_id)}" style="font-size:13px; color:#1331C5; white-space:nowrap;">View summary</a>
+              <a href="/race_summary?race_id=${encodeURIComponent(race.race_id)}" style="font-size:13px; color:#2C9C9C; white-space:nowrap;">View summary</a>
             </div>
             <div style="display:grid; gap:6px;">
               ${top3.length ? top3.map((r) => `
@@ -210,16 +215,33 @@ async function loadLandingOverview() {
     const summary = data.summary || {};
     summaryPanel.innerHTML = `
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-        <div style="padding:12px; border-radius:8px; background:#f6f8ff;"><div style="font-size:12px; color:#6b7280;">Sailors</div><div style="font-size:24px; font-weight:700; color:#1331C5;">${esc(summary.sailor_count ?? 0)}</div></div>
-        <div style="padding:12px; border-radius:8px; background:#f6f8ff;"><div style="font-size:12px; color:#6b7280;">Boats</div><div style="font-size:24px; font-weight:700; color:#1331C5;">${esc(summary.boat_count ?? 0)}</div></div>
-        <div style="padding:12px; border-radius:8px; background:#f6f8ff;"><div style="font-size:12px; color:#6b7280;">Avg turnout</div><div style="font-size:24px; font-weight:700; color:#1331C5;">${esc(Math.round(Number(summary.avg_turnout || 0) * 10) / 10)}</div></div>
-        <div style="padding:12px; border-radius:8px; background:#f6f8ff;"><div style="font-size:12px; color:#6b7280;">Pending reviews</div><div style="font-size:24px; font-weight:700; color:#1331C5;">${esc(summary.pending_review_count ?? 0)}</div></div>
+        <div style="padding:12px; border-radius:8px; background:#F7F9FB;"><div style="font-size:12px; color:#6b7280;">Sailors</div><div style="font-size:24px; font-weight:700; color:#142E4F;">${esc(summary.sailor_count ?? 0)}</div></div>
+        <div style="padding:12px; border-radius:8px; background:#F7F9FB;"><div style="font-size:12px; color:#6b7280;">Boats</div><div style="font-size:24px; font-weight:700; color:#142E4F;">${esc(summary.boat_count ?? 0)}</div></div>
+        <div style="padding:12px; border-radius:8px; background:#F7F9FB;"><div style="font-size:12px; color:#6b7280;">Avg turnout</div><div style="font-size:24px; font-weight:700; color:#142E4F;">${esc(Math.round(Number(summary.avg_turnout || 0) * 10) / 10)}</div></div>
+        <div style="padding:12px; border-radius:8px; background:#F7F9FB;"><div style="font-size:12px; color:#6b7280;">Pending reviews</div><div style="font-size:24px; font-weight:700; color:#142E4F;">${esc(summary.pending_review_count ?? 0)}</div></div>
       </div>
       <div style="margin-top:12px; font-size:13px; color:#6b7280;">Recent races analysed: ${esc(summary.recent_race_count ?? 0)} in the last 90 days.</div>
     `;
+
+    const latestSeries = data.latest_series;
+    latestSeriesPanel.innerHTML = latestSeries
+      ? `
+        <div style="font-weight:600; color:#1f2937;">${esc(latestSeries.series_name)}</div>
+        <div style="font-size:13px; color:#6b7280; margin-top:4px;">Latest race ${formatDateTime(latestSeries.latest_started_at)} · ${esc(latestSeries.race_count)} race(s)</div>
+        <div style="display:grid; gap:6px; margin-top:10px;">
+          ${(latestSeries.results || []).slice(0, 3).map((r) => `
+            <div style="display:flex; justify-content:space-between; gap:10px; font-size:14px;">
+              <span><strong>${esc(r.rank)}.</strong> ${esc(r.sailor_name)}</span>
+              <span style="color:#2C9C9C; white-space:nowrap;">${esc(r.points)} pts</span>
+            </div>
+          `).join('')}
+        </div>
+      `
+      : '<div style="color:#6b7280;">No completed series yet.</div>';
   } catch (err) {
     resultsPanel.textContent = err.message || 'Failed to load latest results.';
     summaryPanel.textContent = err.message || 'Failed to load summary.';
+    latestSeriesPanel.textContent = err.message || 'Failed to load latest series.';
   }
 }
 

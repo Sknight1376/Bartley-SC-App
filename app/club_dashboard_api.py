@@ -12,6 +12,7 @@ from services.club_dashboard_repository import (
     get_race_calendar_rows,
     get_results_review_queue_rows,
     get_sailors_with_boats,
+    get_series_results_rows,
     race_belongs_to_club,
 )
 from services.error_responses import error_payload_for_exception
@@ -65,6 +66,223 @@ def _normalize_rows_by_race(rows, race_key="race_id", lap_key="lap_count", elaps
     return normalized
 
 
+def _format_series_points(value):
+    if value is None:
+        return ""
+    score = float(value)
+    if score.is_integer():
+        return f"{int(score)}.0"
+    return f"{score:.1f}"
+
+
+def _group_series_results(rows):
+    grouped = {}
+
+    for row in rows:
+        sid = row.get("series_id")
+        item = grouped.setdefault(
+            sid,
+            {
+                "series_id": sid,
+                "series_name": row.get("series_name"),
+                "latest_started_at": row.get("latest_started_at"),
+                "race_count": int(row.get("race_count") or 0),
+                "discard_count": int(row.get("discard_count") or 0),
+                "results": [],
+                "races": [],
+                "race_sections": [],
+                "_race_map": {},
+                "_sailor_map": {},
+            },
+        )
+        item["discard_count"] = max(int(item.get("discard_count") or 0), int(row.get("discard_count") or 0))
+
+        race_id = row.get("race_id")
+        race = item["_race_map"].setdefault(
+            race_id,
+            {
+                "race_id": race_id,
+                "race_no": row.get("race_no"),
+                "started_at": row.get("started_at"),
+                "entry_count": 0,
+                "results": [],
+            },
+        )
+        race["entry_count"] += 1
+        race["results"].append(
+            {
+                "rank": row.get("finish_pos"),
+                "sailor_name": row.get("sailor_name"),
+                "boat_name": row.get("boat_name"),
+                "sail_number": row.get("sail_number"),
+                "elapsed_time": _secs_to_hms(row.get("elapsed_sec")),
+                "corrected_time": _secs_to_hms(row.get("corrected_sec")),
+                "did_not_finish": bool(row.get("did_not_finish")),
+            }
+        )
+
+        sailor_key = row.get("sailor_id") or f"name:{row.get('sailor_name')}"
+        sailor = item["_sailor_map"].setdefault(
+            sailor_key,
+            {
+                "sailor_id": row.get("sailor_id"),
+                "sailor_name": row.get("sailor_name"),
+                "boat_name": row.get("boat_name"),
+                "race_lookup": {},
+            },
+        )
+        sailor["race_lookup"][race_id] = {
+            "finish_pos": row.get("finish_pos"),
+            "did_not_finish": bool(row.get("did_not_finish")),
+        }
+
+    output = []
+    for item in grouped.values():
+        races = sorted(
+            item["_race_map"].values(),
+            key=lambda r: (r.get("started_at") or date.min, int(r.get("race_no") or 0), int(r.get("race_id") or 0)),
+        )
+        series_entry_count = len(item["_sailor_map"])
+
+        race_headers = []
+        for race in races:
+            race_headers.append(
+                {
+                    "race_id": race.get("race_id"),
+                    "race_no": race.get("race_no"),
+                    "started_at": race.get("started_at"),
+                    "label": f"R{race.get('race_no')}",
+                }
+            )
+
+            sorted_results = []
+            for result in race.get("results", []):
+                if result.get("rank") is not None:
+                    points_value = float(result.get("rank"))
+                    result_text = _format_series_points(points_value)
+                else:
+                    points_value = float((race.get("entry_count") or 0) + 1)
+                    suffix = "DNF" if result.get("did_not_finish") else "DNC"
+                    result_text = f"{_format_series_points(points_value)} {suffix}"
+
+                sorted_results.append(
+                    {
+                        "rank": result.get("rank"),
+                        "rank_text": _format_series_points(result.get("rank")) if result.get("rank") is not None else "",
+                        "sailor_name": result.get("sailor_name"),
+                        "boat_name": result.get("boat_name"),
+                        "sail_number": result.get("sail_number"),
+                        "elapsed_time": result.get("elapsed_time"),
+                        "corrected_time": result.get("corrected_time"),
+                        "points": result_text,
+                    }
+                )
+
+            race["results"] = sorted(
+                sorted_results,
+                key=lambda r: (r.get("rank") is None, float(r.get("rank") or 999999), r.get("sailor_name") or ""),
+            )
+
+        standings = []
+        status_priority = {"finish": 0, "dnf": 1, "dnc": 2}
+
+        for sailor in item["_sailor_map"].values():
+            races_completed = 0
+            race_results = []
+
+            for race in races:
+                race_default_points = float((race.get("entry_count") or 0) + 1)
+                series_default_points = float(series_entry_count + 1)
+                cell = sailor["race_lookup"].get(race.get("race_id"))
+
+                if cell and cell.get("finish_pos") is not None:
+                    score = float(cell.get("finish_pos"))
+                    races_completed += 1
+                    race_results.append(
+                        {
+                            "race_id": race.get("race_id"),
+                            "score": score,
+                            "text": _format_series_points(score),
+                            "status": "finish",
+                            "discarded": False,
+                        }
+                    )
+                elif cell and cell.get("did_not_finish"):
+                    race_results.append(
+                        {
+                            "race_id": race.get("race_id"),
+                            "score": race_default_points,
+                            "text": f"{_format_series_points(race_default_points)} DNF",
+                            "status": "dnf",
+                            "discarded": False,
+                        }
+                    )
+                else:
+                    race_results.append(
+                        {
+                            "race_id": race.get("race_id"),
+                            "score": series_default_points,
+                            "text": f"{_format_series_points(series_default_points)} DNC",
+                            "status": "dnc",
+                            "discarded": False,
+                        }
+                    )
+
+            discard_slots = min(int(item.get("discard_count") or 0), len(race_results))
+            discard_order = sorted(
+                enumerate(race_results),
+                key=lambda pair: (float(pair[1].get("score") or 0), status_priority.get(pair[1].get("status"), 0), pair[0]),
+                reverse=True,
+            )
+            discard_indexes = {idx for idx, _ in discard_order[:discard_slots]}
+
+            total_points = 0.0
+            for idx, result in enumerate(race_results):
+                if idx in discard_indexes:
+                    result["discarded"] = True
+                    result["text"] = f"({result['text']})"
+                else:
+                    total_points += float(result.get("score") or 0)
+
+            standings.append(
+                {
+                    "sailor_id": sailor.get("sailor_id"),
+                    "sailor_name": sailor.get("sailor_name"),
+                    "boat_name": sailor.get("boat_name"),
+                    "points": round(total_points, 1),
+                    "points_text": _format_series_points(total_points),
+                    "races_completed": races_completed,
+                    "race_results": race_results,
+                }
+            )
+
+        standings.sort(key=lambda r: (float(r.get("points") or 999999), -int(r.get("races_completed") or 0), r.get("sailor_name") or ""))
+        for idx, standing in enumerate(standings, start=1):
+            standing["rank"] = idx
+
+        item["results"] = standings
+        item["races"] = race_headers
+        item["race_sections"] = [
+            {
+                "race_id": race.get("race_id"),
+                "race_no": race.get("race_no"),
+                "started_at": race.get("started_at"),
+                "entry_count": race.get("entry_count"),
+                "results": race.get("results", []),
+            }
+            for race in races
+        ]
+        item.pop("_race_map", None)
+        item.pop("_sailor_map", None)
+        output.append(item)
+
+    return sorted(
+        output,
+        key=lambda s: (s.get("latest_started_at") or date.min, s.get("series_name") or ""),
+        reverse=True,
+    )
+
+
 def dashboard_sailors_boats(db, club_id):
     try:
         with db.engine.connect() as conn:
@@ -108,6 +326,7 @@ def dashboard_landing_overview(db, club_id):
         with db.engine.connect() as conn:
             latest_rows = _normalize_rows_by_race(get_latest_race_results_rows(conn, club_id))
             stats = get_club_summary_stats(conn, club_id)
+            series_rows = get_series_results_rows(conn, club_id)
 
         latest_results = []
         for row in latest_rows:
@@ -125,10 +344,28 @@ def dashboard_landing_overview(db, club_id):
                 }
             )
 
+        series_groups = _group_series_results(series_rows)
+        latest_series = series_groups[0] if series_groups else None
+
         return {
             "ok": True,
             "latest_results": latest_results,
+            "latest_series": latest_series,
             "summary": dict(stats or {}),
+        }, 200
+    except Exception as exc:
+        return error_payload_for_exception(exc)
+
+
+def dashboard_series_results(db, club_id):
+    try:
+        with db.engine.connect() as conn:
+            rows = get_series_results_rows(conn, club_id)
+        series_groups = _group_series_results(rows)
+        return {
+            "ok": True,
+            "series": series_groups,
+            "latest_series_id": series_groups[0].get("series_id") if series_groups else None,
         }, 200
     except Exception as exc:
         return error_payload_for_exception(exc)
