@@ -9,6 +9,18 @@ __pycache__/
 
 # Local secrets — see .env.example for the template
 .env
+.env.local
+.env.development
+.env.production
+
+# Python local tooling artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+venv/
+.venv/
 
 # VS Code workspace — contains machine-specific WSL URIs and local extension config
 .vscode/
@@ -25,3 +37,12 @@ mobile/sailor-android/local.properties
 # Android IDE artifacts
 mobile/sailor-android/.idea/
 mobile/sailor-android/*.iml
+
+# Generic build outputs
+build/
+dist/
+.gradle/
+*.apk
+*.aab
+*.jks
+*.keystore
