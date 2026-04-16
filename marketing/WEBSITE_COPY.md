@@ -1,4 +1,4 @@
-# Layline Website Copy
+# SailingHub Website Copy
 
 This document contains ready-to-use copy for a simple first marketing website.
 
@@ -8,9 +8,9 @@ This document contains ready-to-use copy for a simple first marketing website.
 
 ### Hero
 
-**Race day, made simpler for sailing clubs.**
+**ClubHub for race day. SailorHub for every sailor.**
 
-Layline helps clubs manage races, results, duties, and sailor access in one place — with a web dashboard for admins and a mobile experience for sailors.
+SailingHub helps clubs manage races, results, duties, and sailor access in one place — with ClubHub on the web for admins and SailorHub on mobile for sailors.
 
 **Primary CTA:** Book a demo  
 **Secondary CTA:** Join the pilot
@@ -27,16 +27,16 @@ Built for real club operations:
 
 **Running club racing should not mean juggling spreadsheets, paper notes, and scattered messages.**
 
-Layline brings the core race-day workflow together so clubs can spend less time on administration and more time on sailing.
+SailingHub brings the core race-day workflow together so clubs can spend less time on administration and more time on sailing.
 
 ### Solution section
 
 **One connected system for club admins and sailors**
 
-With Layline, clubs can:
-- manage races and entries from the web
+With SailingHub, clubs can:
+- manage races and entries from ClubHub on the web
 - publish results clearly
-- support sailors with mobile access to races, duties, and results
+- support sailors with SailorHub access to races, duties, and results
 - reduce confusion on busy race days
 
 ### Feature highlights
@@ -69,11 +69,11 @@ Designed around the practical needs of sailing clubs, volunteer race officers, a
 Add your first club quote here once the pilot is complete.
 
 Example:
-> Layline helped us simplify race-day admin and made results easier for sailors to see and understand.
+> SailingHub helped us simplify race-day admin and made results easier for sailors to see and understand.
 
 ### Final CTA
 
-**See how Layline could work for your club**
+**See how SailingHub could work for your club**
 
 Book a short demo and we will walk you through the platform.
 
@@ -89,7 +89,7 @@ Book a short demo and we will walk you through the platform.
 
 ### Intro
 
-Layline is built to support the full club experience — from admin setup and race-day control to published results and sailor visibility.
+SailingHub is built to support the full club experience — with ClubHub for admin setup and race-day control and SailorHub for member visibility.
 
 ### Feature blocks
 
@@ -116,7 +116,7 @@ Built with a practical focus on deployment, security, and operational readiness.
 
 **Built to help sailing clubs run better race days**
 
-Layline was created to make club racing easier to manage, easier to follow, and easier to modernise without adding unnecessary complexity.
+SailingHub was created to make club racing easier to manage, easier to follow, and easier to modernise without adding unnecessary complexity.
 
 We focus on practical tools that help clubs reduce admin overhead while improving the experience for both organisers and sailors.
 
@@ -128,7 +128,7 @@ We focus on practical tools that help clubs reduce admin overhead while improvin
 
 **Book a short demo**
 
-See how Layline can support your club’s race-day workflow.
+See how SailingHub, ClubHub, and SailorHub can support your club’s race-day workflow.
 
 **Suggested form fields:**
 - Name
@@ -153,15 +153,15 @@ We recommend starting with a short live walkthrough and a pilot for selected clu
 Interested in a demo, pilot, or pricing? We would be happy to help.
 
 **Suggested contact emails:**
-- hello@yourdomain
-- sales@yourdomain
-- support@yourdomain
+- hello@sailinghub.co.uk
+- sales@sailinghub.co.uk
+- support@sailinghub.co.uk
 
 ---
 
 ## Short homepage tagline options
 
-- Race-day software for modern sailing clubs
-- Simpler race management for clubs and sailors
-- One place for races, results, duties, and sailor access
+- ClubHub for race day. SailorHub for every sailor.
+- One SailingHub platform for clubs and sailors.
+- Smarter race-day software for modern sailing clubs.
 - Less admin. Better race days.

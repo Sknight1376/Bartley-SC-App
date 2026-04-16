@@ -65,7 +65,8 @@ def get_races_by_date_range(conn, club_id, from_date, to_date):
             FROM "RACINGAPP"."RACE"
             WHERE club = :club_id
               AND started_at IS NOT NULL
-              AND DATE(started_at) BETWEEN :from_date AND :to_date
+              AND started_at >= CAST(:from_date AS timestamp)
+              AND started_at < (CAST(:to_date AS timestamp) + INTERVAL '1 day')
             ORDER BY started_at ASC, key ASC
         '''),
         {"club_id": club_id, "from_date": from_date, "to_date": to_date}

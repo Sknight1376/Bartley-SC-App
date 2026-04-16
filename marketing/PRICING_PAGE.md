@@ -1,4 +1,4 @@
-# Layline Pricing Page Draft
+# SailingHub Pricing Page Draft
 
 This page is written for a simple, club-friendly pricing model.
 
@@ -10,7 +10,7 @@ This page is written for a simple, club-friendly pricing model.
 
 Choose a plan that fits your club size and launch stage. All plans are designed around club use, not per-sailor complexity.
 
-**CTA:** Book a demo  
+**CTA:** Book a SailingHub demo  
 **Secondary CTA:** Talk about a pilot
 
 ---
@@ -36,7 +36,7 @@ Best for clubs wanting to trial the platform before wider adoption.
 
 Includes:
 - initial setup guidance
-- core web and mobile access
+- ClubHub and SailorHub access
 - feedback-driven onboarding
 - limited-term pilot support
 
@@ -48,9 +48,9 @@ Includes:
 Best for small to mid-sized clubs wanting a practical, affordable live setup.
 
 Includes:
-- club dashboard access
+- ClubHub dashboard access
 - race and results workflows
-- sailor mobile access
+- SailorHub mobile access
 - standard support
 - onboarding guidance
 
@@ -120,4 +120,4 @@ For the first wave of clubs:
 
 **Straightforward annual club pricing**
 
-Layline is priced for clubs, not individuals — making it easier to adopt, budget, and support.
+SailingHub is priced for clubs, not individuals — making it easier to adopt, budget, and support.

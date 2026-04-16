@@ -15,7 +15,7 @@ import com.quicksail.sailor.api.Network
 import com.quicksail.sailor.notifications.NotificationCenter
 import com.quicksail.sailor.ui.SailorApp
 
-private val LaylineColorScheme = lightColorScheme(
+private val SailorHubColorScheme = lightColorScheme(
     primary = Color(0xFF142E4F),
     onPrimary = Color(0xFFFFFFFF),
     secondary = Color(0xFF2C9C9C),
@@ -40,7 +40,7 @@ class MainActivity : ComponentActivity() {
         NotificationCenter.init(applicationContext)
         requestNotificationPermissionIfNeeded()
         setContent {
-            MaterialTheme(colorScheme = LaylineColorScheme) {
+            MaterialTheme(colorScheme = SailorHubColorScheme) {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     SailorApp()
                 }

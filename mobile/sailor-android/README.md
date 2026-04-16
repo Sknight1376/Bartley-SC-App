@@ -1,6 +1,6 @@
-# Layline Sailor App
+# SailorHub
 
-Android companion app for the Layline sailing platform.
+Android companion app for the SailingHub platform.
 
 ## Current position
 

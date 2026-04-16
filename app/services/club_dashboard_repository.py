@@ -53,8 +53,8 @@ def get_race_calendar_rows(conn, club_id, from_date=None, to_date=None, limit=20
             FROM "RACINGAPP"."RACE" r
             JOIN "RACINGAPP"."SERIESCONTROL" sc ON sc.key = r.series
             WHERE r.club = :club_id
-              AND (:from_date IS NULL OR DATE(r.started_at) >= :from_date)
-              AND (:to_date IS NULL OR DATE(r.started_at) <= :to_date)
+              AND (:from_date IS NULL OR r.started_at >= CAST(:from_date AS timestamp))
+              AND (:to_date IS NULL OR r.started_at < (CAST(:to_date AS timestamp) + INTERVAL '1 day'))
             ORDER BY r.started_at ASC NULLS LAST, r.key ASC
             LIMIT :limit
         '''),
@@ -88,8 +88,8 @@ def get_duty_roster_rows(conn, club_id, from_date=None, to_date=None, limit=300)
             JOIN "RACINGAPP"."SAILORCONTROL" s ON s.key = rda.sailor
             JOIN "RACINGAPP"."ROLE" role ON role.key = rda.role
             WHERE r.club = :club_id
-              AND (:from_date IS NULL OR DATE(r.started_at) >= :from_date)
-              AND (:to_date IS NULL OR DATE(r.started_at) <= :to_date)
+              AND (:from_date IS NULL OR r.started_at >= CAST(:from_date AS timestamp))
+              AND (:to_date IS NULL OR r.started_at < (CAST(:to_date AS timestamp) + INTERVAL '1 day'))
             ORDER BY r.started_at ASC NULLS LAST, r.race_no ASC, s.fullname ASC
             LIMIT :limit
         '''),

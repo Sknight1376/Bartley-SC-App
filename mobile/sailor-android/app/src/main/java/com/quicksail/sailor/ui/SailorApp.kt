@@ -169,18 +169,18 @@ private fun AuthPage(state: SailorUiState, vm: SailorViewModel) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.layline_logo),
-                    contentDescription = "Layline logo",
+                    painter = painterResource(id = R.drawable.sailorhub_logo),
+                    contentDescription = "SailorHub logo",
                     modifier = Modifier.size(112.dp)
                 )
                 Text(
-                    "Layline",
+                    "SailorHub",
                     style = MaterialTheme.typography.headlineLarge,
                     color = MaterialTheme.colorScheme.primary,
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    "Sailor app",
+                    "by SailingHub",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.secondary
                 )
@@ -611,7 +611,7 @@ private fun SailorHomePage(state: SailorUiState, vm: SailorViewModel) {
                 ) {
                     Column {
                         Text(
-                            "Layline",
+                            "SailorHub",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.secondary
                         )

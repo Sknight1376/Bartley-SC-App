@@ -1,0 +1,14 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sailGradient" x1="240" y1="120" x2="340" y2="320" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#49B8B7"/>
+      <stop offset="1" stop-color="#2C9C9C"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="64" fill="#F7F9FB"/>
+  <circle cx="392" cy="112" r="34" fill="#DCEEEF"/>
+  <path d="M167 319L283 115L226 310L167 319Z" fill="#142E4F"/>
+  <path d="M290 133L334 287L247 307L290 133Z" fill="url(#sailGradient)"/>
+  <path d="M96 336C161 355 238 347 319 326C369 313 412 297 436 299C413 291 374 295 327 307C248 327 164 344 96 336Z" fill="#142E4F"/>
+  <path d="M180 360C250 363 327 344 392 309C367 321 338 332 306 342C264 355 220 363 180 360Z" fill="#2C9C9C"/>
+</svg>
