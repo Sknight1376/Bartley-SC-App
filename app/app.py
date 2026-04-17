@@ -771,9 +771,6 @@ def generate_series_races(conn, series_id, club_id, from_date, to_date):
 
 # ---------- routes ----------
 
-@app.route("/")
-def intro_page():
-    return render_template("intro.html")
 
 
 @app.get("/api/health")
